@@ -58,6 +58,12 @@ const jobSchema = new mongoose.Schema({
     enum: ['Open', 'Assigned', 'In-Progress', 'Completed', 'Cancelled', 'Closed'],
     default: 'Open',
   },
+  // ADDED: Service Type for Hybrid Model
+  serviceType: {
+    type: String,
+    enum: ['local', 'digital'],
+    default: 'local',
+  },
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
