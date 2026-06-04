@@ -1,5 +1,6 @@
 const ChatService = require('../services/chatService');
 const ApiResponse = require('../utils/ApiResponse');
+const ApiError = require('../utils/ApiError');
 const uploadToCloudinary = require('../utils/cloudinaryUpload');
 
 class ChatController {

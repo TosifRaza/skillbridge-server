@@ -64,6 +64,11 @@ const jobSchema = new mongoose.Schema({
     enum: ['local', 'digital'],
     default: 'local',
   },
+  hiredProvider: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null, // Defaults to null until someone is hired
+  },
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

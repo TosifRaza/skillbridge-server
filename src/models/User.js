@@ -51,6 +51,32 @@ const userSchema = new mongoose.Schema({
     enum: ['None', 'Pending', 'Verified', 'Rejected'],
     default: 'None', // Workers will update this to 'Pending' when they upload IDs
   },
+
+    fullName: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  phone: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  avatar: {
+    url: { type: String, default: '' },
+    public_id: { type: String, default: '' },
+  },
+  addresses: [{
+    street: { type: String, required: true },
+    city: { type: String, required: true },
+    zip: { type: String, required: true },
+    isDefault: { type: Boolean, default: false },
+  }],
+  paymentMethods: [{
+    cardBrand: { type: String, required: true }, // e.g., Visa
+    last4: { type: String, required: true },     // e.g., 4242
+    isDefault: { type: Boolean, default: false },
+  }],
 }, { timestamps: true });
 
 // Hash password before saving

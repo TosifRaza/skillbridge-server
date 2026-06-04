@@ -426,15 +426,13 @@ class JobService {
   /**
    * Get single job by ID
    */
-  async getJobById(jobId) {
+    async getJobById(jobId) {
     const job = await Job.findById(jobId)
-      .populate('customer', 'email');
+      .populate('customer', 'email fullName avatar') 
+      .populate('hiredProvider', 'email fullName avatar'); // Now it won't crash!
 
     if (!job) {
-      throw new ApiError(
-        404,
-        'Job not found'
-      );
+      throw new ApiError(404, 'Job not found');
     }
 
     return job;

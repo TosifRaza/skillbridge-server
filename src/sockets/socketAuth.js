@@ -17,6 +17,10 @@ const socketAuth = async (socket, next) => {
     if (!user) {
       return next(new Error('Authentication error: User not found'));
     }
+    // ✅ ADD THIS after the user check:
+    if (user.isBlocked) {
+    return next(new Error('Account is blocked'));
+    }
 
     // Attach user to socket object for use in event handlers
     socket.user = user;
