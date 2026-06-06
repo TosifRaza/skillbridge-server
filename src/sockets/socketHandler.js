@@ -1,11 +1,12 @@
 const ChatService = require('../services/chatService');
+const ApiError = require('../utils/ApiError'); // FIX: Added missing import
 
 // In-memory map to track online users: { userId: Set<socketId> }
 const onlineUsers = new Map();
 
 const getSocketId = (userId) => {
   const socketSet = onlineUsers.get(userId.toString());
-  return socketSet ? Array.from(socketSet) : []; // Return array of socket ids (user might have multiple tabs)
+  return socketSet ? Array.from(socketSet) : [];
 };
 
 module.exports = (io) => {
@@ -20,10 +21,8 @@ module.exports = (io) => {
     io.emit('user-status', { userId, status: 'online' });
 
     // --- JOIN CHAT ROOM ---
-    // Client emits 'join-room' with the conversationId (e.g., job_123)
     socket.on('join-room', (conversationId) => {
       socket.join(conversationId);
-      // Mark messages as read when user joins the room
       ChatService.markAsRead(conversationId, userId);
     });
 
@@ -32,22 +31,22 @@ module.exports = (io) => {
       try {
         const { conversationId, text, imageUrl } = data;
         
-        // Save to DB
+        if (!conversationId) {
+          throw new ApiError(400, 'Conversation ID is required');
+        }
+
         const message = await ChatService.createMessage(conversationId, userId, text, imageUrl);
-        
-        // Broadcast to everyone in the room
         io.to(conversationId).emit('receive-message', message);
 
-        // Acknowledge success to sender
         if (callback) callback({ status: 'ok', message });
       } catch (error) {
+        console.error('❌ Socket Message Error:', error.message);
         if (callback) callback({ status: 'error', message: error.message });
       }
     });
 
     // --- TYPING INDICATOR ---
     socket.on('typing', (conversationId) => {
-      // Broadcast to others in the room
       socket.to(conversationId).emit('display-typing', { userId });
     });
 

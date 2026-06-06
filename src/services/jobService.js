@@ -319,8 +319,10 @@ class JobService {
     const skip = (page - 1) * limit;
 
     const jobs = await Job.find({
+      
       customer: customerId
     })
+      .populate('hiredProvider', 'email fullName') // ADD THIS LINE
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
