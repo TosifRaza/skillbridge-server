@@ -37,7 +37,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
-exports.uploadJobImages = upload.array('files', 5);
+exports.uploadJobImages = upload.array('images', 5);
 
 // NEW: Single file upload for Chat Images
 exports.uploadChatImage = upload.single('image'); // Expects field name 'image'
