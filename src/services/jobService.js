@@ -337,14 +337,31 @@ class JobService {
 
     const skip = (page - 1) * limit;
 
-    const jobs = await Job.find({
-      
+    const rawJobs = await Job.find({
       customer: customerId
     })
-      .populate('hiredProvider', 'email fullName') // ADD THIS LINE
+      .populate('hiredProvider', 'email fullName avatar phone')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    const Application = mongoose.models.Application || require('../models/Application');
+    const jobIds = rawJobs.map(j => j._id);
+    const proposalCounts = await Application.aggregate([
+      { $match: { job: { $in: jobIds } } },
+      { $group: { _id: '$job', count: { $sum: 1 } } }
+    ]);
+
+    const countMap = {};
+    proposalCounts.forEach(p => {
+      countMap[p._id.toString()] = p.count;
+    });
+
+    const jobs = rawJobs.map(j => ({
+      ...j,
+      proposalCount: countMap[j._id.toString()] || 0,
+    }));
 
     const total = await Job.countDocuments({
       customer: customerId
