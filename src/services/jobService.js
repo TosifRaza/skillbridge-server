@@ -466,7 +466,21 @@ class JobService {
     const job = await Job.findById(jobId).populate('customer', 'fullName email phone');
     if (!job) throw new ApiError(404, 'Job not found');
 
-    if (!job.hiredProvider || job.hiredProvider.toString() !== workerId.toString()) {
+    let isHired = false;
+    if (job.hiredProvider && job.hiredProvider.toString() === workerId.toString()) {
+      isHired = true;
+    } else {
+      const Application = mongoose.models.Application || require('../models/Application');
+      const acceptedApp = await Application.findOne({ job: jobId, worker: workerId, status: 'Accepted' });
+      if (acceptedApp) {
+        isHired = true;
+        if (!job.hiredProvider) {
+          job.hiredProvider = workerId;
+        }
+      }
+    }
+
+    if (!isHired) {
       throw new ApiError(403, 'Only the hired worker can mark this work as completed');
     }
 
@@ -510,10 +524,10 @@ class JobService {
 
     // Get amount from accepted application or fallback to job budget
     const Application = mongoose.models.Application || require('../models/Application');
-    const application = await Application.findOne({ job: jobId, status: 'Accepted' });
+    const application = await Application.findOne({ job: jobId, status: 'Accepted' }).populate('worker', 'fullName email phone payoutDetails');
     const amount = Number(application?.bidAmount || job.budget || 0);
 
-    const worker = job.hiredProvider;
+    const worker = job.hiredProvider || application?.worker;
     const workerName = worker?.fullName || worker?.email?.split('@')[0] || 'SkillBridge Provider';
     const workerUpi = worker?.payoutDetails?.upiId || 'skillbridge@upi';
 
@@ -636,10 +650,10 @@ class JobService {
     if (!job) throw new ApiError(404, 'Job not found');
 
     const Application = mongoose.models.Application || require('../models/Application');
-    const application = await Application.findOne({ job: jobId, status: 'Accepted' });
+    const application = await Application.findOne({ job: jobId, status: 'Accepted' }).populate('worker', 'fullName email phone payoutDetails');
     const amount = Number(application?.bidAmount || job.budget || 0);
 
-    const worker = job.hiredProvider;
+    const worker = job.hiredProvider || application?.worker;
     const workerName = worker?.fullName || worker?.email?.split('@')[0] || 'SkillBridge Provider';
     const workerUpi = worker?.payoutDetails?.upiId || 'skillbridge@upi';
 

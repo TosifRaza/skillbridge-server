@@ -308,12 +308,10 @@ class ApplicationService {
 
       .populate({
         path: 'job',
-        
-        // select: 'title budget status location deadline',
-        select: 'title budget status location deadline customer', // ADD customer here
+        select: 'title budget status location deadline customer workSubmittedAt workCompletionMessage customerApproved customerApprovedAt paidAmount paymentMethod hiredProvider',
         populate: {
-          path: 'customer', // NESTED POPULATE to get customer details
-          select: 'email fullName'
+          path: 'customer',
+          select: 'email fullName phone avatar'
         }
       })
       .sort({ createdAt: -1 })
@@ -334,7 +332,7 @@ class ApplicationService {
     if (!job) throw new ApiError(404, 'Job not found or you are not the owner');
 
     const applications = await Application.find({ job: jobId })
-      .populate('worker', 'email role') // Populate basic worker info
+      .populate('worker', 'email role fullName avatar phone payoutDetails') // Populate full worker info
       .sort({ createdAt: -1 });
 
     return applications;
