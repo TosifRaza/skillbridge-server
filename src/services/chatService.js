@@ -58,15 +58,20 @@ class ChatService {
    * Get all conversations for a user
    */
   async getConversations(userId) {
-    // 1. Find all jobs where user is customer or hiredProvider
+    const currentUserId = new mongoose.Types.ObjectId(userId);
     const userJobs = await Job.find({
-      $or: [{ customer: userId }, { hiredProvider: userId }]
-    }).select('_id');
+      $or: [{ customer: currentUserId }, { hiredProvider: currentUserId }],
+      status: { $in: ['Assigned', 'In-Progress', 'Completed'] },
+    })
+      .select('title category status customer hiredProvider budget deadline location serviceType updatedAt')
+      .populate('customer', 'fullName email avatar')
+      .populate('hiredProvider', 'fullName email avatar')
+      .sort({ updatedAt: -1 });
 
-    const jobConversationIds = userJobs.map(job => `job_${job._id}`);
+    if (!userJobs.length) return [];
 
-    // 2. Aggregate messages for these conversations
-    const conversations = await Message.aggregate([
+    const jobConversationIds = userJobs.map((job) => `job_${job._id}`);
+    const messageGroups = await Message.aggregate([
       { $match: { conversationId: { $in: jobConversationIds } } },
       { $sort: { createdAt: -1 } },
       {
@@ -75,34 +80,67 @@ class ChatService {
           lastMessage: { $first: '$$ROOT' },
           unreadCount: {
             $sum: {
-              $cond: [{ $ne: ['$readBy', mongoose.Types.ObjectId(userId)] }, 1, 0]
-            }
-          }
-        }
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$sender', currentUserId] },
+                    { $eq: [{ $in: [currentUserId, { $ifNull: ['$readBy', []] }] }, false] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
       },
-      { $sort: { 'lastMessage.createdAt': -1 } }
     ]);
+    const messagesByConversation = new Map(messageGroups.map((group) => [group._id, group]));
 
-    // 3. Fetch Job details for each conversation
-    const formattedConversations = await Promise.all(conversations.map(async (convo) => {
-      const jobId = convo._id.replace('job_', '');
-      const job = await Job.findById(jobId).select('title category status');
+    return userJobs.map((job) => {
+      const conversationId = `job_${job._id}`;
+      const messages = messagesByConversation.get(conversationId);
+      const isCustomer = job.customer?._id?.toString() === currentUserId.toString();
+      const otherParticipant = isCustomer ? job.hiredProvider : job.customer;
+
       return {
-        conversationId: convo._id,
-        lastMessage: convo.lastMessage,
-        unreadCount: convo.unreadCount,
-        title: job?.title || 'Unknown Job',
-        category: job?.category || '',
-        status: job?.status || '',
-        _id: jobId 
+        _id: job._id,
+        conversationId,
+        title: job.title,
+        category: job.category,
+        status: job.status,
+        budget: job.budget,
+        deadline: job.deadline,
+        location: job.location,
+        serviceType: job.serviceType,
+        participant: otherParticipant ? {
+          _id: otherParticipant._id,
+          fullName: otherParticipant.fullName,
+          email: otherParticipant.email,
+          avatar: otherParticipant.avatar,
+        } : null,
+        lastMessage: messages?.lastMessage || null,
+        unreadCount: messages?.unreadCount || 0,
       };
-    }));
-
-    return formattedConversations;
+    }).sort((a, b) => new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0));
   }
 
-  async createMessage(conversationId, senderId, text, imageUrl = null) {
-    if (!text && !imageUrl) {
+  async getCallParticipant(conversationId, userId) {
+    const jobId = conversationId?.startsWith('job_') ? conversationId.slice(4) : '';
+    if (!mongoose.Types.ObjectId.isValid(jobId)) return null;
+
+    const job = await Job.findById(jobId).select('customer hiredProvider');
+    if (!job) return null;
+
+    const currentUserId = userId.toString();
+    if (job.customer?.toString() === currentUserId) return job.hiredProvider?.toString() || null;
+    if (job.hiredProvider?.toString() === currentUserId) return job.customer?.toString() || null;
+    return null;
+  }
+
+  async createMessage(conversationId, senderId, text, imageUrl = null, imageUrls = []) {
+    const attachments = [...new Set([...(imageUrls || []), ...(imageUrl ? [imageUrl] : [])])];
+    if (!text && attachments.length === 0) {
       throw new ApiError(400, 'Message must contain text or an image');
     }
 
@@ -110,7 +148,8 @@ class ChatService {
       conversationId,
       sender: senderId,
       text,
-      imageUrl,
+      imageUrl: attachments[0] || null,
+      imageUrls: attachments,
       readBy: [senderId],
     });
 

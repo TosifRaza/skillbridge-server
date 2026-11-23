@@ -49,7 +49,6 @@ const config = require('../config');
 // Protect Routes - Verify JWT Access Token
 // ============================================
 exports.protect = async (req, res, next) => {
-   console.log("AUTH HEADER RECEIVED:", req.headers.authorization);
   try {
     let token;
 

@@ -18,6 +18,9 @@ const messageSchema = new mongoose.Schema({
   imageUrl: {
     type: String,
   },
+  imageUrls: [{
+    type: String,
+  }],
   readBy: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

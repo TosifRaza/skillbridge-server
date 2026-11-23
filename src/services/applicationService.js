@@ -153,11 +153,37 @@
 // }
 
 // module.exports = new ApplicationService();
+const mongoose = require('mongoose');
 const Application = require('../models/Application');
 const Job = require('../models/Job');
 const ApiError = require('../utils/ApiError');
 
 class ApplicationService {
+  async getMyActiveApplicationStatuses(workerId) {
+    const applications = await Application.find({
+      worker: workerId,
+      status: { $in: ['Pending', 'Accepted'] },
+    })
+      .select('job status')
+      .lean();
+
+    return applications.reduce((statuses, application) => {
+      statuses[application.job.toString()] = application.status;
+      return statuses;
+    }, {});
+  }
+
+  async getApplicationStatus(workerId, jobId) {
+    const application = await Application.findOne({ job: jobId, worker: workerId })
+      .select('status')
+      .lean();
+
+    return {
+      applied: Boolean(application && ['Pending', 'Accepted'].includes(application.status)),
+      status: application?.status || null,
+    };
+  }
+
   /**
    * Worker applies to a job
    */
@@ -189,13 +215,20 @@ class ApplicationService {
     }
 
     // 3. No existing application found, create a new one
-    application = await Application.create({
-      job: jobId,
-      worker: workerId,
-      proposalMessage,
-      bidAmount,
-      estimatedCompletionTime,
-    });
+    try {
+      application = await Application.create({
+        job: jobId,
+        worker: workerId,
+        proposalMessage,
+        bidAmount,
+        estimatedCompletionTime,
+      });
+    } catch (error) {
+      if (error.code === 11000) {
+        throw new ApiError(409, 'You have already applied to this job');
+      }
+      throw error;
+    }
     
     return application;
   }
@@ -221,33 +254,46 @@ class ApplicationService {
    * Worker withdraws their application OR cancels an active contract
    */
   async withdrawApplication(applicationId, workerId) {
-    const application = await Application.findOne({ _id: applicationId, worker: workerId });
+    const session = await mongoose.startSession();
+    let withdrawnApplication;
 
-    if (!application) throw new ApiError(404, 'Application not found or unauthorized');
+    try {
+      await session.withTransaction(async () => {
+        const application = await Application.findOne({ _id: applicationId, worker: workerId })
+          .session(session);
 
-    // FIX: Allow withdrawal for both 'Pending' and 'Accepted' applications
-    if (!['Pending', 'Accepted'].includes(application.status)) {
-      throw new ApiError(400, 'Only pending or active applications can be withdrawn/canceled');
+        if (!application) throw new ApiError(404, 'Application not found or unauthorized');
+        if (!['Pending', 'Accepted'].includes(application.status)) {
+          throw new ApiError(400, 'Only pending or active applications can be withdrawn/canceled');
+        }
+
+        if (application.status === 'Accepted') {
+          const reopenedJob = await Job.findOneAndUpdate(
+            { _id: application.job, status: 'Assigned', hiredProvider: workerId },
+            { $set: { status: 'Open', hiredProvider: null } },
+            { new: true, session }
+          );
+
+          if (!reopenedJob) {
+            throw new ApiError(409, 'The assigned job changed before the contract could be canceled');
+          }
+        }
+
+        withdrawnApplication = await Application.findOneAndUpdate(
+          { _id: applicationId, worker: workerId, status: application.status },
+          { $set: { status: 'Withdrawn' } },
+          { new: true, session }
+        );
+
+        if (!withdrawnApplication) {
+          throw new ApiError(409, 'The application changed before it could be withdrawn');
+        }
+      });
+
+      return withdrawnApplication;
+    } finally {
+      await session.endSession();
     }
-
-    // Check if the application was accepted (meaning it's an active contract)
-    const wasAccepted = application.status === 'Accepted';
-
-    // Update application status
-    application.status = 'Withdrawn';
-    await application.save();
-
-    // If it was an active contract, we must revert the Job status so other workers can apply again
-    if (wasAccepted) {
-      const job = await Job.findById(application.job);
-      if (job) {
-        job.status = 'Open';
-        job.hiredProvider = null; // Remove the hired worker
-        await job.save();
-      }
-    }
-
-    return application;
   }
 
   /**
@@ -298,42 +344,55 @@ class ApplicationService {
    * Customer accepts an application (CRITICAL BUSINESS LOGIC)
    */
   async acceptApplication(applicationId, customerId) {
-    const application = await Application.findById(applicationId).populate('job');
+    const session = await mongoose.startSession();
+    let acceptedApplication;
 
-    if (!application) throw new ApiError(404, 'Application not found');
+    try {
+      await session.withTransaction(async () => {
+        const application = await Application.findById(applicationId).session(session);
+        if (!application) throw new ApiError(404, 'Application not found');
 
-    // Verify the customer owns the job related to this application
-    if (application.job.customer.toString() !== customerId.toString()) {
-      throw new ApiError(403, 'You are not authorized to accept this application');
+        const job = await Job.findById(application.job).session(session);
+        if (!job) throw new ApiError(404, 'Job not found');
+        if (job.customer.toString() !== customerId.toString()) {
+          throw new ApiError(403, 'You are not authorized to accept this application');
+        }
+        if (application.status !== 'Pending') {
+          throw new ApiError(400, 'Only pending applications can be accepted');
+        }
+        if (job.status !== 'Open') {
+          throw new ApiError(400, 'Job is no longer open for hiring');
+        }
+
+        const assignedJob = await Job.findOneAndUpdate(
+          { _id: job._id, customer: customerId, status: 'Open' },
+          { $set: { status: 'Assigned', hiredProvider: application.worker } },
+          { new: true, session }
+        );
+
+        if (!assignedJob) throw new ApiError(409, 'This job has already been assigned');
+
+        acceptedApplication = await Application.findOneAndUpdate(
+          { _id: applicationId, job: job._id, status: 'Pending' },
+          { $set: { status: 'Accepted' } },
+          { new: true, session }
+        );
+
+        if (!acceptedApplication) {
+          throw new ApiError(409, 'This application is no longer pending');
+        }
+
+        await Application.updateMany(
+          { job: job._id, _id: { $ne: applicationId }, status: 'Pending' },
+          { $set: { status: 'Rejected' } },
+          { session }
+        );
+      });
+
+      return acceptedApplication;
+    } finally {
+      await session.endSession();
     }
-
-    // Verify the application is still pending
-    if (application.status !== 'Pending') {
-      throw new ApiError(400, 'Only pending applications can be accepted');
-    }
-
-    // Verify the job is still open
-    if (application.job.status !== 'Open') {
-      throw new ApiError(400, 'Job is no longer open for hiring');
-    }
-
-    // 1. Accept the current application
-    application.status = 'Accepted';
-    await application.save();
-
-    // 2. Update the Job status and assign the worker
-    const job = await Job.findById(application.job._id);
-    job.status = 'Assigned';
-    job.hiredProvider = application.worker;
-    await job.save();
-
-    // 3. Reject all other pending applications for this job automatically
-    await Application.updateMany(
-      { job: job._id, _id: { $ne: applicationId }, status: 'Pending' },
-      { status: 'Rejected' }
-    );
-
-    return application;
   }
 
   /**
@@ -352,10 +411,15 @@ class ApplicationService {
       throw new ApiError(400, 'Only pending applications can be rejected');
     }
 
-    application.status = 'Rejected';
-    await application.save();
+    const rejectedApplication = await Application.findOneAndUpdate(
+      { _id: applicationId, status: 'Pending' },
+      { $set: { status: 'Rejected' } },
+      { new: true }
+    );
 
-    return application;
+    if (!rejectedApplication) throw new ApiError(409, 'This application is no longer pending');
+
+    return rejectedApplication;
   }
 }
 

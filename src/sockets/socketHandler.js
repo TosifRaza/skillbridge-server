@@ -12,6 +12,7 @@ const getSocketId = (userId) => {
 module.exports = (io) => {
   io.on('connection', (socket) => {
     const userId = socket.user._id.toString();
+    socket.join(userId);
 
     // --- ONLINE STATUS ---
     if (!onlineUsers.has(userId)) {
@@ -29,13 +30,13 @@ module.exports = (io) => {
     // --- SEND MESSAGE ---
     socket.on('send-message', async (data, callback) => {
       try {
-        const { conversationId, text, imageUrl } = data;
+        const { conversationId, text, imageUrl, imageUrls } = data;
         
         if (!conversationId) {
           throw new ApiError(400, 'Conversation ID is required');
         }
 
-        const message = await ChatService.createMessage(conversationId, userId, text, imageUrl);
+        const message = await ChatService.createMessage(conversationId, userId, text, imageUrl, imageUrls);
         io.to(conversationId).emit('receive-message', message);
 
         if (callback) callback({ status: 'ok', message });
@@ -59,6 +60,36 @@ module.exports = (io) => {
       await ChatService.markAsRead(conversationId, userId);
       io.to(conversationId).emit('messages-read', { conversationId, readBy: userId });
     });
+
+    const relayCallEvent = async (eventName, data = {}) => {
+      try {
+        const peerId = await ChatService.getCallParticipant(data.conversationId, userId);
+        if (!peerId) return;
+        io.to(peerId).emit(eventName, { ...data, fromUserId: userId });
+      } catch (error) {
+        console.error('Call signaling error:', error.message);
+      }
+    };
+
+    socket.on('call-initiate', async (data = {}) => {
+      if (!['audio', 'video'].includes(data.callType) || !data.offer || !data.callId) return;
+      await relayCallEvent('call-incoming', {
+        conversationId: data.conversationId,
+        callId: data.callId,
+        callType: data.callType,
+        offer: data.offer,
+        caller: {
+          id: userId,
+          name: socket.user.fullName || socket.user.email,
+          avatar: socket.user.avatar?.url || '',
+        },
+      });
+    });
+
+    socket.on('call-answer', (data) => relayCallEvent('call-answered', data));
+    socket.on('call-ice-candidate', (data) => relayCallEvent('call-ice-candidate', data));
+    socket.on('call-decline', (data) => relayCallEvent('call-declined', data));
+    socket.on('call-end', (data) => relayCallEvent('call-ended', data));
 
     // --- DISCONNECT ---
     socket.on('disconnect', () => {

@@ -19,6 +19,20 @@ router.post(
   applicationController.applyToJob
 );
 
+router.get(
+  '/my-statuses',
+  protect,
+  authorize('provider'),
+  applicationController.getMyApplicationStatuses
+);
+
+router.get(
+  '/status/:jobId',
+  protect,
+  authorize('provider'),
+  applicationController.getApplicationStatus
+);
+
 /**
  * @swagger
  * /api/v1/applications/applied:

@@ -116,12 +116,11 @@
 const ChatService = require('../services/chatService');
 const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
-const Job = require('../models/Job');
-const Application = require('../models/Application');
 
 class ChatController {
   async getChatHistory(req, res, next) {
     try {
+      await ChatService.markAsRead(req.params.conversationId, req.user.id);
       const messages = await ChatService.getChatHistory(req.params.conversationId, req.query.page);
       res.status(200).json(new ApiResponse(200, messages, 'Chat history fetched successfully'));
     } catch (error) {
@@ -143,38 +142,9 @@ class ChatController {
     }
   }
 
-    async getConversations(req, res, next) {
+  async getConversations(req, res, next) {
     try {
-      let conversations = [];
-
-      if (req.user.role === 'customer') {
-        // Customers chat in rooms related to their posted jobs
-        const jobs = await Job.find({ customer: req.user.id }).sort({ updatedAt: -1 });
-        conversations = jobs.map(job => ({
-          _id: job._id,
-          conversationId: `job_${job._id}`,
-          title: job.title,
-          category: job.category,
-          status: job.status
-        }));
-      } else if (req.user.role === 'provider') {
-        // FIX: Only fetch ACCEPTED applications. Workers shouldn't chat about rejected jobs.
-        const applications = await Application.find({ 
-          worker: req.user.id, 
-          status: 'Accepted' // <--- FIX: Filter by accepted applications only
-        })
-          .populate('job', 'title category status')
-          .sort({ updatedAt: -1 });
-          
-        conversations = applications.map(app => ({
-          _id: app._id,
-          conversationId: `job_${app.job?._id}`, // FIX: Safe navigation in case job was deleted
-          title: app.job?.title || 'Deleted Job', // FIX: Safe navigation
-          category: app.job?.category || 'N/A',
-          status: app.job?.status || 'N/A'
-        })).filter(convo => convo.conversationId); // FIX: Filter out any nulls if job was deleted
-      }
-
+      const conversations = await ChatService.getConversations(req.user.id);
       res.status(200).json(new ApiResponse(200, conversations, 'Conversations fetched successfully'));
     } catch (error) {
       next(error);

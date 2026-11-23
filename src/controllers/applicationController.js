@@ -2,6 +2,24 @@ const ApplicationService = require('../services/applicationService');
 const ApiResponse = require('../utils/ApiResponse');
 
 class ApplicationController {
+  async getMyApplicationStatuses(req, res, next) {
+    try {
+      const statuses = await ApplicationService.getMyActiveApplicationStatuses(req.user.id);
+      res.status(200).json(new ApiResponse(200, statuses, 'Your application statuses fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getApplicationStatus(req, res, next) {
+    try {
+      const status = await ApplicationService.getApplicationStatus(req.user.id, req.params.jobId);
+      res.status(200).json(new ApiResponse(200, status, 'Application status fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async applyToJob(req, res, next) {
     try {
       const application = await ApplicationService.applyToJob(req.user.id, req.body);
