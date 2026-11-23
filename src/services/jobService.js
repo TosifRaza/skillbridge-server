@@ -458,6 +458,220 @@ class JobService {
 
     return job;
   }
+
+  /**
+   * Worker marks work as completed and sends notification/message to customer
+   */
+  async submitWorkCompletion(jobId, workerId, { message = '' } = {}) {
+    const job = await Job.findById(jobId).populate('customer', 'fullName email phone');
+    if (!job) throw new ApiError(404, 'Job not found');
+
+    if (!job.hiredProvider || job.hiredProvider.toString() !== workerId.toString()) {
+      throw new ApiError(403, 'Only the hired worker can mark this work as completed');
+    }
+
+    if (job.status === 'Completed') {
+      throw new ApiError(400, 'This job is already completed');
+    }
+
+    job.workSubmittedAt = new Date();
+    job.workCompletionMessage = message?.trim() || 'I have completed the work. Please inspect and approve.';
+    job.status = 'In-Progress';
+    await job.save();
+
+    // If payment record exists, sync with it
+    const Payment = mongoose.models.Payment || require('../models/Payment');
+    await Payment.updateOne(
+      { job: jobId },
+      { $set: { status: 'WorkSubmitted', workSubmittedAt: job.workSubmittedAt } }
+    );
+
+    return job;
+  }
+
+  /**
+   * Customer clicks "YES" to approve completed work, which unlocks/generates the payment QR option
+   */
+  async approveWork(jobId, customerId) {
+    const job = await Job.findById(jobId).populate('hiredProvider', 'fullName email phone payoutDetails');
+    if (!job) throw new ApiError(404, 'Job not found');
+
+    if (job.customer.toString() !== customerId.toString()) {
+      throw new ApiError(403, 'Only the job owner can approve this work');
+    }
+
+    if (!job.workSubmittedAt) {
+      throw new ApiError(400, 'The worker has not marked this work as completed yet');
+    }
+
+    job.customerApproved = true;
+    job.customerApprovedAt = new Date();
+    await job.save();
+
+    // Get amount from accepted application or fallback to job budget
+    const Application = mongoose.models.Application || require('../models/Application');
+    const application = await Application.findOne({ job: jobId, status: 'Accepted' });
+    const amount = Number(application?.bidAmount || job.budget || 0);
+
+    const worker = job.hiredProvider;
+    const workerName = worker?.fullName || worker?.email?.split('@')[0] || 'SkillBridge Provider';
+    const workerUpi = worker?.payoutDetails?.upiId || 'skillbridge@upi';
+
+    const upiIntent = `upi://pay?pa=${encodeURIComponent(workerUpi)}&pn=${encodeURIComponent(workerName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`SkillBridge Work - ${job.title}`)}`;
+
+    return {
+      job,
+      qrDetails: {
+        amount,
+        workerName,
+        workerUpi,
+        upiIntent,
+        customerApproved: true,
+        workSubmitted: true,
+      },
+    };
+  }
+
+  /**
+   * Customer confirms payment via QR code or direct payment
+   */
+  async confirmQRPayment(jobId, customerId, { paymentMethod = 'upi_qr', utrNumber = '' } = {}) {
+    const job = await Job.findById(jobId).populate('hiredProvider', 'fullName email phone payoutDetails');
+    if (!job) throw new ApiError(404, 'Job not found');
+
+    if (job.customer.toString() !== customerId.toString()) {
+      throw new ApiError(403, 'Only the job owner can confirm payment');
+    }
+
+    if (job.status === 'Completed') {
+      return { success: true, message: 'Job already completed', job };
+    }
+
+    const Application = mongoose.models.Application || require('../models/Application');
+    const application = await Application.findOne({ job: jobId, status: 'Accepted' });
+    const amount = Number(application?.bidAmount || job.budget || 0);
+
+    const commissionPercent = 5;
+    const commissionAmount = Math.round((amount * commissionPercent) / 100);
+    const workerAmount = amount - commissionAmount;
+
+    job.status = 'Completed';
+    job.completedAt = new Date();
+    job.customerApproved = true;
+    job.paymentMethod = paymentMethod;
+    job.paidAmount = amount;
+    await job.save();
+
+    // Credit Worker Wallet
+    const Wallet = mongoose.models.Wallet || require('../models/Wallet');
+    const Transaction = mongoose.models.Transaction || require('../models/Transaction');
+
+    let workerWallet = await Wallet.findOne({ user: job.hiredProvider._id });
+    if (!workerWallet) {
+      workerWallet = await Wallet.create({ user: job.hiredProvider._id, balance: 0 });
+    }
+
+    workerWallet.balance += workerAmount;
+    workerWallet.totalEarned += workerAmount;
+    if (workerWallet.inEscrow >= workerAmount) {
+      workerWallet.inEscrow -= workerAmount;
+    } else {
+      workerWallet.inEscrow = 0;
+    }
+    await workerWallet.save();
+
+    // Log transaction
+    const refId = utrNumber?.trim() || `UPI-QR-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const transaction = await Transaction.create({
+      wallet: workerWallet._id,
+      user: job.hiredProvider._id,
+      job: job._id,
+      type: 'credit',
+      title: `Payment Received via UPI QR - ${job.title}`,
+      description: `Payment confirmed by client (${job.paymentMethod === 'upi_qr' ? 'Scanned UPI QR' : 'Direct Payment'}). UTR/Ref: ${refId}`,
+      amount,
+      fee: commissionAmount,
+      netAmount: workerAmount,
+      status: 'Completed',
+      destination: {
+        method: 'upi',
+        upiId: job.hiredProvider?.payoutDetails?.upiId || '',
+        accountHolderName: job.hiredProvider?.fullName || '',
+      },
+      referenceId: refId,
+    });
+
+    // Update Payment record if one exists
+    const Payment = mongoose.models.Payment || require('../models/Payment');
+    await Payment.updateOne(
+      { job: jobId },
+      { $set: { status: 'Released', releasedAt: job.completedAt, settlementStatus: 'completed' } }
+    );
+
+    return {
+      success: true,
+      job,
+      transaction,
+      receipt: {
+        referenceId: refId,
+        jobTitle: job.title,
+        amount,
+        workerAmount,
+        commissionAmount,
+        paidAt: job.completedAt,
+        paymentMethod,
+      },
+    };
+  }
+
+  /**
+   * Get QR payment details for a job
+   */
+  async getJobQRDetails(jobId, userId) {
+    const job = await Job.findById(jobId)
+      .populate('customer', 'fullName email phone')
+      .populate('hiredProvider', 'fullName email phone payoutDetails');
+
+    if (!job) throw new ApiError(404, 'Job not found');
+
+    const Application = mongoose.models.Application || require('../models/Application');
+    const application = await Application.findOne({ job: jobId, status: 'Accepted' });
+    const amount = Number(application?.bidAmount || job.budget || 0);
+
+    const worker = job.hiredProvider;
+    const workerName = worker?.fullName || worker?.email?.split('@')[0] || 'SkillBridge Provider';
+    const workerUpi = worker?.payoutDetails?.upiId || 'skillbridge@upi';
+
+    const upiIntent = `upi://pay?pa=${encodeURIComponent(workerUpi)}&pn=${encodeURIComponent(workerName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`SkillBridge Work - ${job.title}`)}`;
+
+    return {
+      jobId: job._id,
+      title: job.title,
+      status: job.status,
+      amount,
+      workSubmitted: Boolean(job.workSubmittedAt),
+      workSubmittedAt: job.workSubmittedAt,
+      workCompletionMessage: job.workCompletionMessage || '',
+      customerApproved: Boolean(job.customerApproved),
+      customerApprovedAt: job.customerApprovedAt,
+      isCompleted: job.status === 'Completed',
+      paymentMethod: job.paymentMethod || '',
+      worker: {
+        id: worker?._id,
+        name: workerName,
+        email: worker?.email,
+        phone: worker?.phone,
+        upiId: workerUpi,
+        hasUpi: Boolean(worker?.payoutDetails?.upiId),
+      },
+      customer: {
+        id: job.customer?._id,
+        name: job.customer?.fullName || job.customer?.email,
+      },
+      upiIntent,
+    };
+  }
 }
 
 module.exports = new JobService();

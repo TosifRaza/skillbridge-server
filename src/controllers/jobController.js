@@ -64,6 +64,42 @@ class JobController {
       next(error);
     }
   }
+
+  async completeWork(req, res, next) {
+    try {
+      const job = await JobService.submitWorkCompletion(req.params.id, req.user.id, req.body);
+      res.status(200).json(new ApiResponse(200, job, 'Work marked as completed and sent to customer'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async approveWork(req, res, next) {
+    try {
+      const result = await JobService.approveWork(req.params.id, req.user.id);
+      res.status(200).json(new ApiResponse(200, result, 'Work approved. Payment QR is now ready'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async confirmQRPayment(req, res, next) {
+    try {
+      const result = await JobService.confirmQRPayment(req.params.id, req.user.id, req.body);
+      res.status(200).json(new ApiResponse(200, result, 'Payment confirmed successfully. Job marked completed'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getJobQRDetails(req, res, next) {
+    try {
+      const result = await JobService.getJobQRDetails(req.params.id, req.user.id);
+      res.status(200).json(new ApiResponse(200, result, 'QR payment details fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new JobController();

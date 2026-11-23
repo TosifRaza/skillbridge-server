@@ -100,4 +100,35 @@ router.delete(
   jobController.deleteJob
 );
 
+// Worker marks work as completed
+router.post(
+  '/:id/complete-work',
+  protect,
+  authorize('provider'),
+  jobController.completeWork
+);
+
+// Customer approves work (activates QR generation)
+router.post(
+  '/:id/approve-work',
+  protect,
+  authorize('customer'),
+  jobController.approveWork
+);
+
+// Customer confirms payment via QR code
+router.post(
+  '/:id/confirm-qr-payment',
+  protect,
+  authorize('customer'),
+  jobController.confirmQRPayment
+);
+
+// Get QR payment details
+router.get(
+  '/:id/qr-details',
+  protect,
+  jobController.getJobQRDetails
+);
+
 module.exports = router;

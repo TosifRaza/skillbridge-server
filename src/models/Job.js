@@ -73,6 +73,26 @@ const jobSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  workCompletionMessage: {
+    type: String,
+    default: '',
+  },
+  customerApproved: {
+    type: Boolean,
+    default: false,
+  },
+  customerApprovedAt: {
+    type: Date,
+    default: null,
+  },
+  paymentMethod: {
+    type: String,
+    default: '',
+  },
+  paidAmount: {
+    type: Number,
+    default: 0,
+  },
   completedAt: {
     type: Date,
     default: null,
