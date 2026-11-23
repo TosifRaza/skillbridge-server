@@ -56,6 +56,15 @@ class AdminController {
     }
   }
 
+  async connectWorkerPayoutAccount(req, res, next) {
+    try {
+      const worker = await AdminService.connectWorkerPayoutAccount(req.params.id, req.body.linkedAccountId);
+      res.status(200).json(new ApiResponse(200, worker, 'Worker payout account connected'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getAllJobs(req, res, next) {
     try {
       const jobs = await AdminService.getAllJobs(req.query);

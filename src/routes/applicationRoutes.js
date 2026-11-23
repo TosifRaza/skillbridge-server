@@ -98,4 +98,11 @@ router.patch(
   applicationController.rejectApplication
 );
 
+router.get(
+  '/customer-proposals',
+  protect,
+  authorize('customer'),
+  applicationController.getCustomerProposals
+);
+
 module.exports = router;

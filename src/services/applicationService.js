@@ -421,6 +421,16 @@ class ApplicationService {
 
     return rejectedApplication;
   }
+
+  async getCustomerProposals(customerId) {
+    const jobs = await Job.find({ customer: customerId }).select('_id');
+    const jobIds = jobs.map((j) => j._id);
+    const applications = await Application.find({ job: { $in: jobIds } })
+      .populate('worker', 'email fullName avatar averageRating totalReviews')
+      .populate('job', 'title status budget')
+      .sort({ createdAt: -1 });
+    return applications;
+  }
 }
 
 module.exports = new ApplicationService();

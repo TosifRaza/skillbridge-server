@@ -18,6 +18,12 @@ cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
 cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
 cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET,
 
+// Razorpay Route marketplace payments
+razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
+razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+platformCommissionPercent: Number(process.env.PLATFORM_COMMISSION_PERCENT || 5),
+
 // Pagination Config
 defaultPageLimit: process.env.DEFAULT_PAGE_LIMIT || 10,
 };

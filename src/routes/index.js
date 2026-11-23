@@ -8,6 +8,8 @@ const chatRoutes = require('./chatRoutes'); // <-- ADD
 const reviewRoutes = require('./reviewRoutes'); // <-- ADD
 const adminRoutes = require('./adminRoutes'); // <-- ADD
 const userRoutes = require('./userRoutes'); // Add import
+const paymentRoutes = require('./paymentRoutes');
+const walletRoutes = require('./walletRoutes');
 
 router.use('/auth', authRoutes); // <-- ADD THIS
 router.use('/jobs', jobRoutes); // <-- ADD
@@ -16,6 +18,8 @@ router.use('/chat', chatRoutes); // <-- ADD
 router.use('/reviews', reviewRoutes); // <-- ADD
 router.use('/admin', adminRoutes); // <-- ADD
 router.use('/users', userRoutes); // Mount route
+router.use('/payments', paymentRoutes);
+router.use('/wallet', walletRoutes);
 // Health check route for monitoring and uptime checks
 router.get('/health', (req, res) => {
   res.status(200).json({

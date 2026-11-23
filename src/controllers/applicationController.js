@@ -73,6 +73,15 @@ class ApplicationController {
       next(error);
     }
   }
+
+  async getCustomerProposals(req, res, next) {
+    try {
+      const applications = await ApplicationService.getCustomerProposals(req.user.id);
+      res.status(200).json(new ApiResponse(200, applications, 'Customer proposals fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new ApplicationController();

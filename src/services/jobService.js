@@ -167,8 +167,10 @@
 
 
 const Job = require('../models/Job');
+const Application = require('../models/Application');
 const ApiError = require('../utils/ApiError');
 const uploadToCloudinary = require('../utils/cloudinaryUpload');
+const mongoose = require('mongoose');
 
 class JobService {
   /**
@@ -184,7 +186,8 @@ class JobService {
       address,
       longitude,
       latitude,
-      serviceType // ADDED: Extract serviceType
+      serviceType, // ADDED: Extract serviceType
+      hiredProvider
     } = jobData;
 
     // Upload images to Cloudinary
@@ -203,6 +206,8 @@ class JobService {
       }));
     }
 
+    const isDirectHire = hiredProvider && mongoose.Types.ObjectId.isValid(hiredProvider);
+
     // Create Job
     const job = await Job.create({
       title,
@@ -213,15 +218,29 @@ class JobService {
       location: {
         type: 'Point',
         coordinates: [
-          parseFloat(longitude),
-          parseFloat(latitude)
+          parseFloat(longitude) || 88.3639,
+          parseFloat(latitude) || 22.5726
         ],
-        address
+        address: address || 'Service Address'
       },
       images: imageUrls,
       customer: customerId,
-      serviceType: serviceType || 'local' // ADDED: Save serviceType
+      serviceType: serviceType || 'local',
+      hiredProvider: isDirectHire ? hiredProvider : null,
+      status: isDirectHire ? 'Assigned' : 'Open'
     });
+
+    // If direct hire, create an auto-accepted Application record
+    if (isDirectHire) {
+      await Application.create({
+        job: job._id,
+        worker: hiredProvider,
+        proposalMessage: 'Direct booking by customer.',
+        bidAmount: budget,
+        estimatedCompletionTime: 'As agreed with customer',
+        status: 'Accepted'
+      });
+    }
 
     return job;
   }

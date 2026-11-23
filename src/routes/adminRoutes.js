@@ -53,6 +53,7 @@ router.patch('/workers/:id/verify', adminController.verifyWorker);
  *     summary: Reject worker verification
  */
 router.patch('/workers/:id/reject', adminController.rejectWorkerVerification);
+router.patch('/workers/:id/payout-account', adminController.connectWorkerPayoutAccount);
 
 /**
  * @swagger

@@ -69,6 +69,14 @@ const jobSchema = new mongoose.Schema({
     ref: 'User',
     default: null, // Defaults to null until someone is hired
   },
+  workSubmittedAt: {
+    type: Date,
+    default: null,
+  },
+  completedAt: {
+    type: Date,
+    default: null,
+  },
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

@@ -62,6 +62,11 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+  skills: [{
+    type: String,
+    trim: true,
+    maxlength: 60,
+  }],
   avatar: {
     url: { type: String, default: '' },
     public_id: { type: String, default: '' },
@@ -77,6 +82,24 @@ const userSchema = new mongoose.Schema({
     last4: { type: String, required: true },     // e.g., 4242
     isDefault: { type: Boolean, default: false },
   }],
+  razorpayLinkedAccountId: {
+    type: String,
+    trim: true,
+    default: '',
+    select: false,
+  },
+  payoutStatus: {
+    type: String,
+    enum: ['NotConnected', 'Pending', 'Active', 'Restricted'],
+    default: 'NotConnected',
+  },
+  payoutDetails: {
+    accountHolderName: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    accountNumber: { type: String, default: '' },
+    ifscCode: { type: String, default: '' },
+    upiId: { type: String, default: '' },
+  },
 }, { timestamps: true });
 
 // Hash password before saving

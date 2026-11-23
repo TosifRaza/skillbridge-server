@@ -3,6 +3,7 @@ const Job = require('../models/Job');
 const Application = require('../models/Application');
 const Report = require('../models/Report');
 const ApiError = require('../utils/ApiError');
+const razorpayRoute = require('../integrations/razorpayRoute');
 
 class AdminService {
   /**
@@ -108,6 +109,20 @@ class AdminService {
     worker.verificationStatus = 'Rejected';
     await worker.save();
     return worker;
+  }
+
+  async connectWorkerPayoutAccount(workerId, linkedAccountId) {
+    if (!/^acc_[A-Za-z0-9]+$/.test(linkedAccountId || '')) {
+      throw new ApiError(400, 'A valid Razorpay Route linked account ID is required');
+    }
+    const worker = await User.findOne({ _id: workerId, role: 'provider' }).select('+razorpayLinkedAccountId');
+    if (!worker) throw new ApiError(404, 'Worker not found');
+    const linkedAccount = await razorpayRoute.fetchLinkedAccount(linkedAccountId);
+    if (linkedAccount.id !== linkedAccountId) throw new ApiError(409, 'Razorpay could not verify this linked account');
+    worker.razorpayLinkedAccountId = linkedAccountId;
+    worker.payoutStatus = 'Active';
+    await worker.save();
+    return { _id: worker._id, email: worker.email, payoutStatus: worker.payoutStatus };
   }
 
   /**

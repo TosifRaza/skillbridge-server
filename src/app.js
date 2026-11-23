@@ -5,12 +5,16 @@ const loggerMiddleware = require('./middlewares/loggerMiddleware');
 const { errorConverter, errorHandler } = require('./middlewares/errorMiddleware');
 const routes = require('./routes');
 const cookieParser = require('cookie-parser'); // <-- ADD IMPORT
+const paymentController = require('./controllers/paymentController');
 const app = express();
 
 // ========== SECURITY MIDDLEWARE ==========
 app.use(security.helmet);
 app.use(security.cors);
 app.use(security.rateLimiter);
+
+// Razorpay must be verified against the exact raw request body.
+app.post('/api/v1/payments/webhook', express.raw({ type: 'application/json', limit: '256kb' }), paymentController.webhook);
 
 // ========== PARSER MIDDLEWARE ==========
 app.use(express.json({ limit: '10kb' })); // Body limit to prevent oversized payloads

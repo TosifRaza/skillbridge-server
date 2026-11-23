@@ -20,6 +20,24 @@ class UserController {
       next(error);
     }
   }
+
+  async getWorkers(req, res, next) {
+    try {
+      const workers = await UserService.getWorkers();
+      res.status(200).json(new ApiResponse(200, workers, 'Workers fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getWorkerProfile(req, res, next) {
+    try {
+      const worker = await UserService.getWorkerProfile(req.params.id);
+      res.status(200).json(new ApiResponse(200, worker, 'Worker profile fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new UserController();

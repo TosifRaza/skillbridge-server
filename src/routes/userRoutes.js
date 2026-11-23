@@ -6,5 +6,7 @@ const { uploadAvatar } = require('../middlewares/uploadMiddleware'); // NEW IMPO
 
 router.patch('/me', protect, userController.updateProfile);
 router.patch('/me/avatar', protect, uploadAvatar, userController.updateAvatar); // Uses single upload
+router.get('/workers', protect, userController.getWorkers);
+router.get('/:id/profile', protect, userController.getWorkerProfile);
 
 module.exports = router;

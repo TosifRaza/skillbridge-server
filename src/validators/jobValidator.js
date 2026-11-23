@@ -10,6 +10,7 @@ const createJobValidator = [
   body('address').notEmpty().withMessage('Address is required'),
   body('longitude').isNumeric().withMessage('Longitude must be a number').notEmpty(),
   body('latitude').isNumeric().withMessage('Latitude must be a number').notEmpty(),
+  body('hiredProvider').optional().isString(),
 ];
 
 const updateJobValidator = [
