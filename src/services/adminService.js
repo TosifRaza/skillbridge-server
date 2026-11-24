@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Job = require('../models/Job');
 const Application = require('../models/Application');
 const Report = require('../models/Report');
+const Payment = require('../models/Payment');
 const ApiError = require('../utils/ApiError');
 const razorpayRoute = require('../integrations/razorpayRoute');
 
@@ -10,6 +11,16 @@ class AdminService {
    * Get Dashboard Analytics
    */
   async getDashboardStats() {
+    const now = new Date();
+    const firstMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1));
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5 + index, 1));
+      return {
+        key: `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`,
+        month: date.toLocaleString('en', { month: 'short', timeZone: 'UTC' }),
+      };
+    });
+
     const totalUsers = await User.countDocuments({ role: 'customer' });
     const totalWorkers = await User.countDocuments({ role: 'provider' });
     const totalJobs = await Job.countDocuments();
@@ -24,18 +35,28 @@ class AdminService {
       },
     ]);
 
-    // Calculate theoretical revenue (sum of budget of completed jobs)
-    const revenueData = await Job.aggregate([
-      { $match: { status: 'Completed' } },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$budget' },
-        },
-      },
+    const [revenueData, categoryData, userGrowthData, revenueTrendData] = await Promise.all([
+      Payment.aggregate([
+        { $match: { status: 'Released' } },
+        { $group: { _id: null, total: { $sum: '$commissionAmount' } } },
+      ]),
+      Job.aggregate([
+        { $group: { _id: '$category', jobs: { $sum: 1 } } },
+        { $sort: { jobs: -1, _id: 1 } },
+      ]),
+      User.aggregate([
+        { $match: { createdAt: { $gte: firstMonth } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } }, users: { $sum: 1 } } },
+      ]),
+      Payment.aggregate([
+        { $match: { status: 'Released', releasedAt: { $gte: firstMonth } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$releasedAt' } }, revenue: { $sum: '$commissionAmount' } } },
+      ]),
     ]);
 
-    const totalRevenue = revenueData.length > 0 ? revenueData[0].totalRevenue : 0;
+    const totalRevenue = revenueData[0]?.total || 0;
+    const usersByMonth = new Map(userGrowthData.map(({ _id, users }) => [_id, users]));
+    const revenueByMonth = new Map(revenueTrendData.map(({ _id, revenue }) => [_id, revenue]));
 
     // Format job stats into an object
     const formattedJobStats = {};
@@ -49,6 +70,9 @@ class AdminService {
       totalJobs,
       totalRevenue,
       jobStatusBreakdown: formattedJobStats,
+      categoryBreakdown: categoryData.map(({ _id, jobs }) => ({ name: _id || 'Uncategorized', jobs })),
+      userGrowth: months.map(({ key, month }) => ({ month, users: usersByMonth.get(key) || 0 })),
+      revenueTrend: months.map(({ key, month }) => ({ month, revenue: revenueByMonth.get(key) || 0 })),
     };
   }
 
@@ -56,10 +80,11 @@ class AdminService {
    * Get all users with filtering and pagination
    */
   async getAllUsers(query) {
-    const { role, isBlocked, search, page = 1, limit = 10 } = query;
+    const { role, isBlocked, search, verificationStatus, page = 1, limit = 10 } = query;
     const filter = {};
 
     if (role) filter.role = role;
+    if (verificationStatus) filter.verificationStatus = verificationStatus;
     if (isBlocked !== undefined) filter.isBlocked = isBlocked === 'true';
     if (search) {
       filter.email = { $regex: search, $options: 'i' };

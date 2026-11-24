@@ -28,7 +28,20 @@ const securityMiddleware = {
 
   // Cross-Origin Resource Sharing
   cors: cors({
-    origin: config.clientUrl,
+    origin: (origin, callback) => {
+      // Allow non-browser requests (Postman, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      // Allow the configured app, local development, and Render hosted frontends.
+      if (
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('https://localhost:') ||
+        origin.endsWith('.onrender.com') ||
+        origin === config.clientUrl
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error('Origin is not allowed by CORS'));
+    },
     credentials: true,
   }),
 
