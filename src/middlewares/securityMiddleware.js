@@ -48,10 +48,24 @@ const securityMiddleware = {
   // Rate limiting to prevent brute force/DDoS attacks
   rateLimiter: rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    // The app uses several authenticated reads and cross-portal status refreshes.
+    // Keep a generous general limit; brute-force protection is scoped below to auth.
+    limit: 600,
     message: {
       success: false,
-      message: 'Too many requests from this IP, please try again after 15 minutes',
+      message: 'This device has made too many requests. Please slow down and try again shortly.',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+  }),
+
+  authRateLimiter: rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    skipSuccessfulRequests: true,
+    message: {
+      success: false,
+      message: 'Too many sign-in attempts. Please wait before trying again.',
     },
     standardHeaders: true,
     legacyHeaders: false,

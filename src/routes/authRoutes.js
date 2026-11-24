@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const security = require('../middlewares/securityMiddleware');
 const { registerValidator, loginValidator, validate } = require('../validators/authValidator');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -10,7 +11,7 @@ const { protect } = require('../middlewares/authMiddleware');
  *   post:
  *     summary: Register a new user
  */
-router.post('/register', registerValidator, validate, authController.register);
+router.post('/register', security.authRateLimiter, registerValidator, validate, authController.register);
 
 /**
  * @swagger
@@ -18,7 +19,7 @@ router.post('/register', registerValidator, validate, authController.register);
  *   post:
  *     summary: Login a user
  */
-router.post('/login', loginValidator, validate, authController.login);
+router.post('/login', security.authRateLimiter, loginValidator, validate, authController.login);
 
 /**
  * @swagger

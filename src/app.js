@@ -8,6 +8,10 @@ const cookieParser = require('cookie-parser'); // <-- ADD IMPORT
 const paymentController = require('./controllers/paymentController');
 const app = express();
 
+// Render forwards the originating client IP through one trusted proxy hop.
+// This keeps IP-based throttling per client instead of grouping all visitors.
+app.set('trust proxy', 1);
+
 // ========== SECURITY MIDDLEWARE ==========
 app.use(security.helmet);
 app.use(security.cors);
