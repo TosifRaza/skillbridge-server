@@ -21,10 +21,26 @@ const messageSchema = new mongoose.Schema({
   imageUrls: [{
     type: String,
   }],
+  type: {
+    type: String,
+    enum: ['text', 'call'],
+    default: 'text',
+  },
+  call: {
+    callId: { type: String },
+    callType: { type: String, enum: ['audio', 'video'] },
+    status: { type: String, enum: ['ringing', 'ongoing', 'completed', 'missed', 'declined', 'cancelled'] },
+    startedAt: { type: Date },
+    answeredAt: { type: Date },
+    endedAt: { type: Date },
+    durationSeconds: { type: Number, default: 0 },
+  },
   readBy: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
   }],
 }, { timestamps: true });
+
+messageSchema.index({ 'call.callId': 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Message', messageSchema);

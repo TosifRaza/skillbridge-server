@@ -73,6 +73,13 @@ module.exports = (io) => {
 
     socket.on('call-initiate', async (data = {}) => {
       if (!['audio', 'video'].includes(data.callType) || !data.offer || !data.callId) return;
+      try {
+        const callLog = await ChatService.createCallLog(data.conversationId, userId, data);
+        io.to(data.conversationId).emit('receive-message', callLog);
+      } catch (error) {
+        console.error('Call log create error:', error.message);
+        return;
+      }
       await relayCallEvent('call-incoming', {
         conversationId: data.conversationId,
         callId: data.callId,
@@ -86,10 +93,34 @@ module.exports = (io) => {
       });
     });
 
-    socket.on('call-answer', (data) => relayCallEvent('call-answered', data));
+    socket.on('call-answer', async (data = {}) => {
+      try {
+        const callLog = await ChatService.updateCallLog(data.conversationId, data.callId, userId, 'answer');
+        io.to(data.conversationId).emit('call-log-updated', callLog);
+        await relayCallEvent('call-answered', data);
+      } catch (error) {
+        console.error('Call answer error:', error.message);
+      }
+    });
     socket.on('call-ice-candidate', (data) => relayCallEvent('call-ice-candidate', data));
-    socket.on('call-decline', (data) => relayCallEvent('call-declined', data));
-    socket.on('call-end', (data) => relayCallEvent('call-ended', data));
+    socket.on('call-decline', async (data = {}) => {
+      try {
+        const callLog = await ChatService.updateCallLog(data.conversationId, data.callId, userId, 'decline');
+        io.to(data.conversationId).emit('call-log-updated', callLog);
+        await relayCallEvent('call-declined', data);
+      } catch (error) {
+        console.error('Call decline error:', error.message);
+      }
+    });
+    socket.on('call-end', async (data = {}) => {
+      try {
+        const callLog = await ChatService.updateCallLog(data.conversationId, data.callId, userId, 'end', data.reason);
+        io.to(data.conversationId).emit('call-log-updated', callLog);
+        await relayCallEvent('call-ended', data);
+      } catch (error) {
+        console.error('Call end error:', error.message);
+      }
+    });
 
     // --- DISCONNECT ---
     socket.on('disconnect', () => {

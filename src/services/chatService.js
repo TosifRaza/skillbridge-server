@@ -157,6 +157,70 @@ class ChatService {
     return message;
   }
 
+  async createCallLog(conversationId, callerId, { callId, callType }) {
+    const peerId = await this.getCallParticipant(conversationId, callerId);
+    if (!peerId) throw new ApiError(403, 'You are not a participant in this project conversation');
+
+    const existing = await Message.findOne({ 'call.callId': callId });
+    if (existing) return existing.populate('sender', 'email role fullName avatar');
+
+    const message = await Message.create({
+      conversationId,
+      sender: callerId,
+      type: 'call',
+      call: {
+        callId,
+        callType,
+        status: 'ringing',
+        startedAt: new Date(),
+        durationSeconds: 0,
+      },
+      readBy: [callerId],
+    });
+    await message.populate('sender', 'email role fullName avatar');
+    return message;
+  }
+
+  async updateCallLog(conversationId, callId, actorId, action, reason = '') {
+    const peerId = await this.getCallParticipant(conversationId, actorId);
+    if (!peerId) throw new ApiError(403, 'You are not a participant in this project conversation');
+
+    const message = await Message.findOne({ conversationId, 'call.callId': callId, type: 'call' });
+    if (!message) throw new ApiError(404, 'Call record not found');
+
+    const callerId = message.sender.toString();
+    const currentStatus = message.call.status;
+    if (message.call.endedAt) return message.populate('sender', 'email role fullName avatar');
+
+    if (action === 'answer') {
+      if (callerId === actorId.toString()) throw new ApiError(403, 'Only the receiving participant can answer this call');
+      if (currentStatus === 'ringing') {
+        message.call.answeredAt = new Date();
+        message.call.status = 'ongoing';
+      }
+    } else if (action === 'decline') {
+      if (callerId === actorId.toString()) throw new ApiError(403, 'Only the receiving participant can decline this call');
+      message.call.endedAt = new Date();
+      message.call.status = 'declined';
+      message.call.durationSeconds = 0;
+    } else if (action === 'end') {
+      message.call.endedAt = new Date();
+      if (message.call.answeredAt) {
+        message.call.status = 'completed';
+        message.call.durationSeconds = Math.max(0, Math.floor((message.call.endedAt - message.call.answeredAt) / 1000));
+      } else {
+        message.call.status = reason === 'cancelled' ? 'cancelled' : 'missed';
+        message.call.durationSeconds = 0;
+      }
+    } else {
+      throw new ApiError(400, 'Unknown call update');
+    }
+
+    await message.save();
+    await message.populate('sender', 'email role fullName avatar');
+    return message;
+  }
+
   async uploadImage(fileBuffer) {
     const result = await uploadToCloudinary(fileBuffer, 'SkillBridge/Chat');
     return result;
