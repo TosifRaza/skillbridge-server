@@ -68,6 +68,8 @@ class JobController {
   async completeWork(req, res, next) {
     try {
       const job = await JobService.submitWorkCompletion(req.params.id, req.user.id, req.body);
+      const conversationId = `job_${job._id}`;
+      req.app.get('io')?.to(conversationId).emit('job-work-submitted', { conversationId });
       res.status(200).json(new ApiResponse(200, job, 'Work marked as completed and sent to customer'));
     } catch (error) {
       next(error);

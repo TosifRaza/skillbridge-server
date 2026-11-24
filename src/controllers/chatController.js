@@ -120,9 +120,30 @@ const ApiError = require('../utils/ApiError');
 class ChatController {
   async getChatHistory(req, res, next) {
     try {
+      await ChatService.requireParticipant(req.params.conversationId, req.user.id);
       await ChatService.markAsRead(req.params.conversationId, req.user.id);
       const messages = await ChatService.getChatHistory(req.params.conversationId, req.query.page);
       res.status(200).json(new ApiResponse(200, messages, 'Chat history fetched successfully'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async sendDocument(req, res, next) {
+    try {
+      const { conversationId } = req.params;
+      const message = await ChatService.sendDocument(conversationId, req.user.id, req.file, req.body?.text);
+      req.app.get('io')?.to(conversationId).emit('receive-message', message);
+      res.status(201).json(new ApiResponse(201, message, 'File sent'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getDocument(req, res, next) {
+    try {
+      const attachment = await ChatService.getDocument(req.params.conversationId, req.user.id, req.params.messageId);
+      res.attachment(attachment.name).type('application/pdf').set('Cache-Control', 'private, no-store').send(attachment.data);
     } catch (error) {
       next(error);
     }

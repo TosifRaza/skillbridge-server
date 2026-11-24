@@ -336,6 +336,10 @@ class JobService {
    * Get all jobs posted by logged-in customer
    */
   async getMyJobs(customerId, query) {
+    if (['all', 'applied', 'active', 'completed', 'cancelled'].includes(query.view)) {
+      return this.getMyJobsOverview(customerId, query);
+    }
+
     const page = parseInt(query.page, 10) || 1;
     const limit = parseInt(query.limit, 10) || 10;
 
@@ -378,6 +382,67 @@ class JobService {
       page,
       pages: Math.ceil(total / limit)
     };
+  }
+
+  async getMyJobsOverview(customerId, { view, sort, page }) {
+    const pageNumber = Math.min(1000000, Math.max(1, parseInt(page, 10) || 1));
+    const pageSize = 10;
+    const sortOrder = sort === 'deadline'
+      ? { deadline: 1, _id: 1 }
+      : sort === 'oldest' ? { createdAt: 1, _id: 1 } : { createdAt: -1, _id: -1 };
+
+    const [result] = await Job.aggregate([
+      { $match: { customer: new mongoose.Types.ObjectId(customerId) } },
+      {
+        $lookup: {
+          from: Application.collection.name,
+          localField: '_id',
+          foreignField: 'job',
+          pipeline: [{ $match: { status: 'Pending' } }, { $limit: 1 }, { $project: { _id: 1 } }],
+          as: 'pendingProposals',
+        },
+      },
+      {
+        $project: {
+          title: 1, category: 1, budget: 1, deadline: 1, 'location.address': 1,
+          status: 1, serviceType: 1, workSubmittedAt: 1, customerApproved: 1,
+          paymentReported: { $ne: [{ $ifNull: ['$paymentReference', ''] }, ''] },
+          createdAt: 1,
+          group: {
+            $switch: {
+              branches: [
+                { case: { $eq: ['$status', 'Completed'] }, then: 'completed' },
+                { case: { $in: ['$status', ['Cancelled', 'Closed']] }, then: 'cancelled' },
+                {
+                  case: { $and: [{ $eq: ['$status', 'Open'] }, { $gt: [{ $size: '$pendingProposals' }, 0] }] },
+                  then: 'applied',
+                },
+              ],
+              default: 'active',
+            },
+          },
+        },
+      },
+      {
+        $facet: {
+          counts: [{ $group: { _id: '$group', count: { $sum: 1 } } }],
+          jobs: [
+            ...(view === 'all' ? [] : [{ $match: { group: view } }]),
+            { $sort: sortOrder },
+            { $skip: (pageNumber - 1) * pageSize },
+            { $limit: pageSize },
+          ],
+        },
+      },
+    ]);
+
+    const counts = { all: 0, applied: 0, active: 0, completed: 0, cancelled: 0 };
+    for (const { _id, count } of result?.counts || []) {
+      counts[_id] = count;
+      counts.all += count;
+    }
+
+    return { jobs: result?.jobs || [], counts, total: counts[view], page: pageNumber, pages: Math.ceil(counts[view] / pageSize) };
   }
 
   /**

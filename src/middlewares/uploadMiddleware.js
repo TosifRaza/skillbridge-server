@@ -42,5 +42,7 @@ exports.uploadJobImages = upload.array('images', 5);
 // NEW: Single file upload for Chat Images
 exports.uploadChatImage = upload.single('image'); // Expects field name 'image'
 
+exports.uploadChatDocument = multer({ storage, limits: { fileSize: 5 * 1024 * 1024, files: 1 } }).single('file');
+
 // FIX: Added missing uploadAvatar export for Profile Pictures
 exports.uploadAvatar = upload.single('avatar');

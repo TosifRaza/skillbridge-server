@@ -21,6 +21,11 @@ const messageSchema = new mongoose.Schema({
   imageUrls: [{
     type: String,
   }],
+  attachment: {
+    name: String,
+    size: Number,
+    data: { type: Buffer, select: false },
+  },
   type: {
     type: String,
     enum: ['text', 'call'],

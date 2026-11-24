@@ -58,12 +58,14 @@ const express = require('express');
 const router = express.Router();
 const chatController = require('../controllers/chatController');
 const { protect } = require('../middlewares/authMiddleware');
-const { uploadChatImage } = require('../middlewares/uploadMiddleware');
+const { uploadChatImage, uploadChatDocument } = require('../middlewares/uploadMiddleware');
 
 // FIX: Added /conversations route BEFORE /:conversationId
 router.get('/conversations', protect, chatController.getConversations);
 
 router.get('/:conversationId', protect, chatController.getChatHistory);
+router.post('/:conversationId/files', protect, uploadChatDocument, chatController.sendDocument);
+router.get('/:conversationId/files/:messageId', protect, chatController.getDocument);
 
 router.post(
   '/upload-image',

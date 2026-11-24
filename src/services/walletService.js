@@ -2,9 +2,59 @@ const mongoose = require('mongoose');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const Payment = require('../models/Payment');
+const Job = require('../models/Job');
 const User = require('../models/User');
 const razorpayRoute = require('../integrations/razorpayRoute');
 const ApiError = require('../utils/ApiError');
+
+const protectedPaymentStates = ['Funded', 'WorkSubmitted', 'ReleasePending'];
+
+const recordsPayment = (transactions, { job, payment, type }) => transactions.some((entry) => (
+  entry.type === type && (entry.status === 'Completed' || entry.status === 'InEscrow') && (
+    (payment && String(entry.payment) === String(payment)) ||
+    (job && String(entry.job) === String(job))
+  )
+));
+
+const buildCustomerHistory = async (userId, payments, transactions) => {
+  const customerPayments = payments.filter((payment) => String(payment.customer) === String(userId));
+  const paymentJobIds = customerPayments.filter((payment) => payment.job).map((payment) => payment.job._id);
+  const directPayments = await Job.find({
+    customer: userId, status: 'Completed', paidAmount: { $gt: 0 }, _id: { $nin: paymentJobIds },
+  }).select('title paidAmount completedAt updatedAt').lean();
+
+  const history = [...transactions];
+  for (const payment of customerPayments) {
+    const isProtected = protectedPaymentStates.includes(payment.status);
+    const isRefunded = payment.status === 'Refunded';
+    if (!isProtected && !isRefunded && payment.status !== 'Released') continue;
+
+    const type = isProtected ? 'escrow_hold' : isRefunded ? 'credit' : 'debit';
+    if (recordsPayment(transactions, { job: payment.job?._id, payment: payment._id, type })) continue;
+    history.push({
+      _id: `contract-${payment._id}`,
+      title: payment.job?.title || 'Contract payment',
+      type,
+      amount: payment.grossAmount,
+      status: isProtected ? 'InEscrow' : isRefunded ? 'Refunded' : 'Completed',
+      createdAt: (isProtected ? payment.fundedAt : isRefunded ? payment.updatedAt : payment.releasedAt) || payment.updatedAt,
+    });
+  }
+
+  for (const job of directPayments) {
+    if (recordsPayment(transactions, { job: job._id, type: 'debit' })) continue;
+    history.push({
+      _id: `job-${job._id}`, title: job.title, type: 'debit', amount: job.paidAmount,
+      status: 'Completed', createdAt: job.completedAt || job.updatedAt,
+    });
+  }
+
+  const totalSpent = history.reduce((sum, entry) => (
+    entry.type === 'debit' && entry.status === 'Completed' ? sum + Number(entry.amount || 0) : sum
+  ), 0);
+  history.sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+  return { totalSpent, transactions: history.slice(0, 50) };
+};
 
 class WalletService {
   async getWallet(userId) {
@@ -36,13 +86,13 @@ class WalletService {
 
     payments.forEach((payment) => {
       if (user.role === 'provider' && payment.worker?.toString() === userId.toString()) {
-        if (['Funded', 'WorkSubmitted', 'ReleasePending'].includes(payment.status)) {
+        if (protectedPaymentStates.includes(payment.status)) {
           realInEscrow += Number(payment.workerAmount || 0);
         } else if (payment.status === 'Released') {
           realEarned += Number(payment.workerAmount || 0);
         }
       } else if (user.role === 'customer' && payment.customer?.toString() === userId.toString()) {
-        if (['Funded', 'WorkSubmitted', 'ReleasePending'].includes(payment.status)) {
+        if (protectedPaymentStates.includes(payment.status)) {
           realInEscrow += Number(payment.grossAmount || 0);
         }
       }
@@ -69,9 +119,9 @@ class WalletService {
     wallet.balance = calculatedBalance;
     await wallet.save();
 
-    const transactions = await Transaction.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .limit(50);
+    const history = user.role === 'customer'
+      ? await buildCustomerHistory(userId, payments, userTransactions)
+      : { transactions: await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(50) };
 
     return {
       wallet: {
@@ -80,9 +130,11 @@ class WalletService {
         inEscrow: wallet.inEscrow,
         totalEarned: wallet.totalEarned,
         totalWithdrawn: wallet.totalWithdrawn,
+        totalDeposited,
+        ...(user.role === 'customer' ? { totalSpent: history.totalSpent } : {}),
         currency: wallet.currency,
       },
-      transactions,
+      transactions: history.transactions,
       payoutDetails: user.payoutDetails || {},
       payoutStatus: user.payoutStatus || 'NotConnected',
     };

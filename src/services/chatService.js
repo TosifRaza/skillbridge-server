@@ -63,7 +63,7 @@ class ChatService {
       $or: [{ customer: currentUserId }, { hiredProvider: currentUserId }],
       status: { $in: ['Assigned', 'In-Progress', 'Completed'] },
     })
-      .select('title category status customer hiredProvider budget deadline location serviceType updatedAt')
+      .select('title category status customer hiredProvider budget deadline location serviceType workSubmittedAt updatedAt')
       .populate('customer', 'fullName email avatar')
       .populate('hiredProvider', 'fullName email avatar')
       .sort({ updatedAt: -1 });
@@ -73,6 +73,7 @@ class ChatService {
     const jobConversationIds = userJobs.map((job) => `job_${job._id}`);
     const messageGroups = await Message.aggregate([
       { $match: { conversationId: { $in: jobConversationIds } } },
+      { $unset: 'attachment.data' },
       { $sort: { createdAt: -1 } },
       {
         $group: {
@@ -109,6 +110,7 @@ class ChatService {
         title: job.title,
         category: job.category,
         status: job.status,
+        workSubmittedAt: job.workSubmittedAt,
         budget: job.budget,
         deadline: job.deadline,
         location: job.location,
@@ -126,7 +128,7 @@ class ChatService {
   }
 
   async getCallParticipant(conversationId, userId) {
-    const jobId = conversationId?.startsWith('job_') ? conversationId.slice(4) : '';
+    const jobId = typeof conversationId === 'string' && conversationId.startsWith('job_') ? conversationId.slice(4) : '';
     if (!mongoose.Types.ObjectId.isValid(jobId)) return null;
 
     const job = await Job.findById(jobId).select('customer hiredProvider');
@@ -136,6 +138,39 @@ class ChatService {
     if (job.customer?.toString() === currentUserId) return job.hiredProvider?.toString() || null;
     if (job.hiredProvider?.toString() === currentUserId) return job.customer?.toString() || null;
     return null;
+  }
+
+  async requireParticipant(conversationId, userId) {
+    const peerId = await this.getCallParticipant(conversationId, userId);
+    if (!peerId) throw new ApiError(403, 'You are not a participant in this project conversation');
+    return peerId;
+  }
+
+  async sendDocument(conversationId, userId, file, text) {
+    await this.requireParticipant(conversationId, userId);
+    if (!file?.buffer?.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+      throw new ApiError(400, 'Choose a PDF file.');
+    }
+    const cleanName = file.originalname.replace(/[^a-zA-Z0-9._ -]/g, '_').replace(/\.pdf$/i, '').trim();
+    const message = await Message.create({
+      conversationId,
+      sender: userId,
+      text: typeof text === 'string' ? text.trim() : '',
+      attachment: { name: `${cleanName.slice(0, 100) || 'document'}.pdf`, size: file.size, data: file.buffer },
+      readBy: [userId],
+    });
+
+    const result = message.toObject();
+    delete result.attachment.data;
+    return result;
+  }
+
+  async getDocument(conversationId, userId, messageId) {
+    await this.requireParticipant(conversationId, userId);
+    if (!mongoose.Types.ObjectId.isValid(messageId)) throw new ApiError(404, 'File not found');
+    const message = await Message.findOne({ _id: messageId, conversationId }).select('+attachment.data');
+    if (!message?.attachment?.data) throw new ApiError(404, 'File not found');
+    return message.attachment;
   }
 
   async createMessage(conversationId, senderId, text, imageUrl = null, imageUrls = []) {

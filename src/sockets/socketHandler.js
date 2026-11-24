@@ -22,9 +22,28 @@ module.exports = (io) => {
     io.emit('user-status', { userId, status: 'online' });
 
     // --- JOIN CHAT ROOM ---
-    socket.on('join-room', (conversationId) => {
-      socket.join(conversationId);
-      ChatService.markAsRead(conversationId, userId);
+    socket.on('join-room', async (conversationId) => {
+      try {
+        await ChatService.requireParticipant(conversationId, userId);
+        if (!socket.connected) return;
+        await socket.join(conversationId);
+        await ChatService.markAsRead(conversationId, userId);
+        socket.to(conversationId).emit('messages-read', { conversationId, readBy: userId });
+      } catch (error) {
+        console.error('Could not join chat room:', error.message);
+      }
+    });
+    socket.on('leave-room', (conversationId) => {
+      if (typeof conversationId === 'string' && conversationId.startsWith('job_')) socket.leave(conversationId);
+    });
+    socket.on('get-conversation-presence', async (conversationId, acknowledge) => {
+      if (typeof acknowledge !== 'function') return;
+      try {
+        const peerId = await ChatService.requireParticipant(conversationId, userId);
+        acknowledge({ online: getSocketId(peerId).length > 0 });
+      } catch {
+        acknowledge({ online: false });
+      }
     });
 
     // --- SEND MESSAGE ---
@@ -36,6 +55,7 @@ module.exports = (io) => {
           throw new ApiError(400, 'Conversation ID is required');
         }
 
+        await ChatService.requireParticipant(conversationId, userId);
         const message = await ChatService.createMessage(conversationId, userId, text, imageUrl, imageUrls);
         io.to(conversationId).emit('receive-message', message);
 
@@ -48,17 +68,22 @@ module.exports = (io) => {
 
     // --- TYPING INDICATOR ---
     socket.on('typing', (conversationId) => {
-      socket.to(conversationId).emit('display-typing', { userId });
+      if (socket.rooms.has(conversationId)) socket.to(conversationId).emit('display-typing', { conversationId, userId });
     });
 
     socket.on('stop-typing', (conversationId) => {
-      socket.to(conversationId).emit('display-stop-typing', { userId });
+      if (socket.rooms.has(conversationId)) socket.to(conversationId).emit('display-stop-typing', { conversationId, userId });
     });
 
     // --- READ RECEIPTS ---
     socket.on('mark-as-read', async (conversationId) => {
-      await ChatService.markAsRead(conversationId, userId);
-      io.to(conversationId).emit('messages-read', { conversationId, readBy: userId });
+      if (!socket.rooms.has(conversationId)) return;
+      try {
+        await ChatService.markAsRead(conversationId, userId);
+        socket.to(conversationId).emit('messages-read', { conversationId, readBy: userId });
+      } catch (error) {
+        console.error('Could not update chat read status:', error.message);
+      }
     });
 
     const relayCallEvent = async (eventName, data = {}) => {
