@@ -30,6 +30,12 @@ const jobSchema = new mongoose.Schema({
     required: [true, 'Budget is required'],
     min: [0, 'Budget cannot be negative'],
   },
+  // Frozen price once a worker is hired; differs from budget when the customer accepts a bid.
+  contractAmount: {
+    type: Number,
+    default: null,
+    min: [0, 'Contract amount cannot be negative'],
+  },
   deadline: {
     type: Date,
     required: [true, 'Deadline is required'],

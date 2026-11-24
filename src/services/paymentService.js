@@ -11,6 +11,15 @@ const ApiError = require('../utils/ApiError');
 const toId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
 
 class PaymentService {
+  getContractAmount(job, application) {
+    if (Number.isFinite(Number(job.contractAmount)) && job.contractAmount !== null && job.contractAmount !== undefined) {
+      return Number(job.contractAmount);
+    }
+    // Legacy direct-booking records should use the agreed customer budget, not a stale application bid.
+    if (application.proposalMessage === 'Direct booking by customer.') return Number(job.budget);
+    return Number(application.bidAmount);
+  }
+
   calculateBreakdown(bidAmount) {
     const grossPaise = Math.round(Number(bidAmount) * 100);
     if (!Number.isFinite(grossPaise) || grossPaise < 100) throw new ApiError(400, 'Invalid contract amount');
@@ -36,6 +45,9 @@ class PaymentService {
     if (!job) throw new ApiError(404, 'Job not found');
     const application = await Application.findOne({ job: jobId, status: 'Accepted' });
     if (!application) throw new ApiError(409, 'This job does not have an accepted contract');
+    if (toId(job.hiredProvider) && toId(job.hiredProvider) !== toId(application.worker)) {
+      throw new ApiError(409, 'The assigned worker does not match the accepted proposal');
+    }
     return { job, application };
   }
 
@@ -53,6 +65,8 @@ class PaymentService {
       jobId: job._id,
       status,
       currency: 'INR',
+      jobBudget: Number(job.budget),
+      priceBasis: breakdown.grossAmount === Number(job.budget) ? 'budget' : 'accepted_bid',
       grossAmount: payment?.grossAmount ?? breakdown.grossAmount,
       commissionPercent: payment?.commissionPercent ?? breakdown.commissionPercent,
       commissionAmount: payment?.commissionAmount ?? breakdown.commissionAmount,
@@ -63,7 +77,7 @@ class PaymentService {
       transferStatus: payment?.transferStatus || '',
       settlementStatus: payment?.settlementStatus || '',
       workerPayoutReady: job.hiredProvider?.payoutStatus === 'Active',
-      canPay: isCustomer && ['Assigned'].includes(job.status) && ['NotStarted', 'Created'].includes(status),
+      canPay: isCustomer && ['Assigned'].includes(job.status) && ['NotStarted', 'Created', 'Failed'].includes(status),
       canSubmitWork: isWorker && job.status === 'In-Progress' && status === 'Funded',
       canRelease: isCustomer && status === 'WorkSubmitted',
       publicKey: razorpayRoute.getPublicKey(),
@@ -74,7 +88,18 @@ class PaymentService {
     const { job, application } = await this.getContract(jobId);
     this.assertParticipant(job, userId);
     const payment = await Payment.findOne({ job: jobId });
-    return this.serialize(payment, this.calculateBreakdown(application.bidAmount), job, userId);
+    const breakdown = this.calculateBreakdown(this.getContractAmount(job, application));
+    this.assertPaymentMatchesContract(payment, application, breakdown.grossAmount);
+    return this.serialize(payment, breakdown, job, userId);
+  }
+
+  assertPaymentMatchesContract(payment, application, amount) {
+    if (!payment) return;
+    if (toId(payment.application) !== toId(application._id)
+      || toId(payment.worker) !== toId(application.worker)
+      || Number(payment.grossAmount) !== Number(amount)) {
+      throw new ApiError(409, 'An earlier payment attempt does not match the accepted contract. Please contact support before paying.');
+    }
   }
 
   async createOrder(jobId, customerId) {
@@ -83,10 +108,13 @@ class PaymentService {
     if (job.status !== 'Assigned') throw new ApiError(409, 'Only an assigned contract can be funded');
 
     const existing = await Payment.findOne({ job: jobId });
-    const breakdown = this.calculateBreakdown(application.bidAmount);
+    const breakdown = this.calculateBreakdown(this.getContractAmount(job, application));
+    this.assertPaymentMatchesContract(existing, application, breakdown.grossAmount);
     if (existing) {
-      if (existing.status !== 'Created') throw new ApiError(409, 'This contract payment has already been processed');
-      return { ...this.serialize(existing, breakdown, job, customerId), orderId: existing.razorpayOrderId };
+      if (existing.status === 'Created') {
+        return { ...this.serialize(existing, breakdown, job, customerId), orderId: existing.razorpayOrderId };
+      }
+      if (existing.status !== 'Failed') throw new ApiError(409, 'This contract payment has already been processed');
     }
 
     const worker = await User.findById(application.worker).select('+razorpayLinkedAccountId payoutStatus fullName email');
@@ -109,17 +137,36 @@ class PaymentService {
       }],
     });
 
-    const payment = await Payment.create({
-      job: job._id,
-      application: application._id,
-      customer: customerId,
-      worker: application.worker,
-      grossAmount: breakdown.grossAmount,
-      commissionPercent: breakdown.commissionPercent,
-      commissionAmount: breakdown.commissionAmount,
-      workerAmount: breakdown.workerAmount,
-      razorpayOrderId: order.id,
-    });
+    const payment = existing
+      ? await Payment.findByIdAndUpdate(existing._id, {
+        $set: {
+          grossAmount: breakdown.grossAmount,
+          commissionPercent: breakdown.commissionPercent,
+          commissionAmount: breakdown.commissionAmount,
+          workerAmount: breakdown.workerAmount,
+          status: 'Created',
+          razorpayOrderId: order.id,
+          razorpayPaymentId: '',
+          razorpayTransferId: '',
+          transferStatus: '',
+          settlementStatus: '',
+          fundedAt: null,
+          workSubmittedAt: null,
+          releasedAt: null,
+          failureReason: '',
+        },
+      }, { new: true })
+      : await Payment.create({
+        job: job._id,
+        application: application._id,
+        customer: customerId,
+        worker: application.worker,
+        grossAmount: breakdown.grossAmount,
+        commissionPercent: breakdown.commissionPercent,
+        commissionAmount: breakdown.commissionAmount,
+        workerAmount: breakdown.workerAmount,
+        razorpayOrderId: order.id,
+      });
     return { ...this.serialize(payment, breakdown, job, customerId), orderId: order.id };
   }
 
@@ -187,6 +234,10 @@ class PaymentService {
       await payment.save();
       job.status = 'Completed';
       job.completedAt = payment.releasedAt;
+      job.paidAmount = payment.grossAmount;
+      job.paymentMethod = 'razorpay_escrow';
+      job.customerApproved = true;
+      job.customerApprovedAt = payment.releasedAt;
       await job.save();
       return payment;
     } catch (error) {

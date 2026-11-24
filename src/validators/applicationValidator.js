@@ -13,8 +13,8 @@ const createApplicationValidator = [
   body('bidAmount')
     .isNumeric()
     .withMessage('Bid amount must be a number')
-    .isFloat({ min: 0 })
-    .withMessage('Bid amount cannot be negative'),
+    .isFloat({ min: 1 })
+    .withMessage('Proposed price must be at least ₹1'),
   body('estimatedCompletionTime')
     .notEmpty()
     .withMessage('Estimated completion time is required'),

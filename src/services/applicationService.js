@@ -156,6 +156,7 @@
 const mongoose = require('mongoose');
 const Application = require('../models/Application');
 const Job = require('../models/Job');
+const Payment = require('../models/Payment');
 const ApiError = require('../utils/ApiError');
 
 class ApplicationService {
@@ -175,12 +176,18 @@ class ApplicationService {
 
   async getApplicationStatus(workerId, jobId) {
     const application = await Application.findOne({ job: jobId, worker: workerId })
-      .select('status')
+      .select('status bidAmount proposalMessage job')
+      .populate('job', 'budget contractAmount')
       .lean();
+    const contractAmount = application?.job?.contractAmount
+      ?? (application?.proposalMessage === 'Direct booking by customer.' ? application?.job?.budget : application?.bidAmount)
+      ?? null;
 
     return {
       applied: Boolean(application && ['Pending', 'Accepted'].includes(application.status)),
       status: application?.status || null,
+      bidAmount: application?.bidAmount ?? null,
+      contractAmount,
     };
   }
 
@@ -268,9 +275,14 @@ class ApplicationService {
         }
 
         if (application.status === 'Accepted') {
+          const existingPayment = await Payment.findOne({ job: application.job }).session(session);
+          if (existingPayment) {
+            throw new ApiError(409, 'This contract has a payment attempt. It cannot be canceled until the payment is resolved.');
+          }
+
           const reopenedJob = await Job.findOneAndUpdate(
             { _id: application.job, status: 'Assigned', hiredProvider: workerId },
-            { $set: { status: 'Open', hiredProvider: null } },
+            { $set: { status: 'Open', hiredProvider: null }, $unset: { contractAmount: 1 } },
             { new: true, session }
           );
 
@@ -308,7 +320,7 @@ class ApplicationService {
 
       .populate({
         path: 'job',
-        select: 'title budget status location deadline customer workSubmittedAt workCompletionMessage customerApproved customerApprovedAt paidAmount paymentMethod hiredProvider',
+        select: 'title budget contractAmount status location deadline customer workSubmittedAt workCompletionMessage customerApproved customerApprovedAt paidAmount paymentMethod hiredProvider',
         populate: {
           path: 'customer',
           select: 'email fullName phone avatar'
@@ -364,7 +376,7 @@ class ApplicationService {
 
         const assignedJob = await Job.findOneAndUpdate(
           { _id: job._id, customer: customerId, status: 'Open' },
-          { $set: { status: 'Assigned', hiredProvider: application.worker } },
+          { $set: { status: 'Assigned', hiredProvider: application.worker, contractAmount: Number(application.bidAmount) } },
           { new: true, session }
         );
 
