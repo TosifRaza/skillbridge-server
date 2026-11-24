@@ -70,6 +70,11 @@ const jobSchema = new mongoose.Schema({
     enum: ['local', 'digital'],
     default: 'local',
   },
+  bookingType: {
+    type: String,
+    enum: ['marketplace', 'direct'],
+    default: 'marketplace',
+  },
   hiredProvider: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

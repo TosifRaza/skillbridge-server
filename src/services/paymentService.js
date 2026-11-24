@@ -7,19 +7,11 @@ const WebhookEvent = require('../models/WebhookEvent');
 const razorpayRoute = require('../integrations/razorpayRoute');
 const config = require('../config');
 const ApiError = require('../utils/ApiError');
+const { getContractAmount } = require('../utils/contractPricing');
 
 const toId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
 
 class PaymentService {
-  getContractAmount(job, application) {
-    if (Number.isFinite(Number(job.contractAmount)) && job.contractAmount !== null && job.contractAmount !== undefined) {
-      return Number(job.contractAmount);
-    }
-    // Legacy direct-booking records should use the agreed customer budget, not a stale application bid.
-    if (application.proposalMessage === 'Direct booking by customer.') return Number(job.budget);
-    return Number(application.bidAmount);
-  }
-
   calculateBreakdown(bidAmount) {
     const grossPaise = Math.round(Number(bidAmount) * 100);
     if (!Number.isFinite(grossPaise) || grossPaise < 100) throw new ApiError(400, 'Invalid contract amount');
@@ -56,10 +48,15 @@ class PaymentService {
     if (toId(job.customer) !== id && toId(job.hiredProvider) !== id) throw new ApiError(403, 'You are not part of this contract');
   }
 
-  serialize(payment, breakdown, job, currentUserId) {
+  serialize(payment, breakdown, job, currentUserId, application) {
     const status = payment?.status || 'NotStarted';
     const isCustomer = toId(job.customer) === currentUserId.toString();
     const isWorker = toId(job.hiredProvider) === currentUserId.toString();
+    const priceMismatch = Boolean(payment && (
+      Number(payment.grossAmount) !== Number(breakdown.grossAmount)
+      || toId(payment.application) !== toId(application?._id)
+      || toId(payment.worker) !== toId(application?.worker)
+    ));
     return {
       id: payment?._id || null,
       jobId: job._id,
@@ -67,6 +64,8 @@ class PaymentService {
       currency: 'INR',
       jobBudget: Number(job.budget),
       priceBasis: breakdown.grossAmount === Number(job.budget) ? 'budget' : 'accepted_bid',
+      contractAmount: breakdown.grossAmount,
+      priceMismatch,
       grossAmount: payment?.grossAmount ?? breakdown.grossAmount,
       commissionPercent: payment?.commissionPercent ?? breakdown.commissionPercent,
       commissionAmount: payment?.commissionAmount ?? breakdown.commissionAmount,
@@ -77,9 +76,9 @@ class PaymentService {
       transferStatus: payment?.transferStatus || '',
       settlementStatus: payment?.settlementStatus || '',
       workerPayoutReady: job.hiredProvider?.payoutStatus === 'Active',
-      canPay: isCustomer && ['Assigned'].includes(job.status) && ['NotStarted', 'Created', 'Failed'].includes(status),
-      canSubmitWork: isWorker && job.status === 'In-Progress' && status === 'Funded',
-      canRelease: isCustomer && status === 'WorkSubmitted',
+      canPay: !priceMismatch && isCustomer && ['Assigned'].includes(job.status) && ['NotStarted', 'Created', 'Failed'].includes(status),
+      canSubmitWork: !priceMismatch && isWorker && job.status === 'In-Progress' && status === 'Funded',
+      canRelease: !priceMismatch && isCustomer && status === 'WorkSubmitted',
       publicKey: razorpayRoute.getPublicKey(),
     };
   }
@@ -88,9 +87,8 @@ class PaymentService {
     const { job, application } = await this.getContract(jobId);
     this.assertParticipant(job, userId);
     const payment = await Payment.findOne({ job: jobId });
-    const breakdown = this.calculateBreakdown(this.getContractAmount(job, application));
-    this.assertPaymentMatchesContract(payment, application, breakdown.grossAmount);
-    return this.serialize(payment, breakdown, job, userId);
+    const breakdown = this.calculateBreakdown(getContractAmount(job, application));
+    return this.serialize(payment, breakdown, job, userId, application);
   }
 
   assertPaymentMatchesContract(payment, application, amount) {
@@ -108,7 +106,7 @@ class PaymentService {
     if (job.status !== 'Assigned') throw new ApiError(409, 'Only an assigned contract can be funded');
 
     const existing = await Payment.findOne({ job: jobId });
-    const breakdown = this.calculateBreakdown(this.getContractAmount(job, application));
+    const breakdown = this.calculateBreakdown(getContractAmount(job, application));
     this.assertPaymentMatchesContract(existing, application, breakdown.grossAmount);
     if (existing) {
       if (existing.status === 'Created') {

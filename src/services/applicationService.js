@@ -158,6 +158,7 @@ const Application = require('../models/Application');
 const Job = require('../models/Job');
 const Payment = require('../models/Payment');
 const ApiError = require('../utils/ApiError');
+const { getContractAmount } = require('../utils/contractPricing');
 
 class ApplicationService {
   async getMyActiveApplicationStatuses(workerId) {
@@ -177,11 +178,9 @@ class ApplicationService {
   async getApplicationStatus(workerId, jobId) {
     const application = await Application.findOne({ job: jobId, worker: workerId })
       .select('status bidAmount proposalMessage job')
-      .populate('job', 'budget contractAmount')
+      .populate('job', 'budget contractAmount bookingType title description')
       .lean();
-    const contractAmount = application?.job?.contractAmount
-      ?? (application?.proposalMessage === 'Direct booking by customer.' ? application?.job?.budget : application?.bidAmount)
-      ?? null;
+    const contractAmount = application?.job ? getContractAmount(application.job, application) : null;
 
     return {
       applied: Boolean(application && ['Pending', 'Accepted'].includes(application.status)),

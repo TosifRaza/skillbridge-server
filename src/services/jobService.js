@@ -171,6 +171,7 @@ const Application = require('../models/Application');
 const ApiError = require('../utils/ApiError');
 const uploadToCloudinary = require('../utils/cloudinaryUpload');
 const mongoose = require('mongoose');
+const { getContractAmount } = require('../utils/contractPricing');
 
 class JobService {
   /**
@@ -227,6 +228,7 @@ class JobService {
       images: imageUrls,
       customer: customerId,
       serviceType: serviceType || 'local',
+      bookingType: isDirectHire ? 'direct' : 'marketplace',
       hiredProvider: isDirectHire ? hiredProvider : null,
       status: isDirectHire ? 'Assigned' : 'Open'
     });
@@ -516,7 +518,7 @@ class JobService {
 
     const Application = mongoose.models.Application || require('../models/Application');
     const application = await Application.findOne({ job: jobId, status: 'Accepted' }).populate('worker', 'fullName email phone payoutDetails');
-    const amount = Number(job.contractAmount ?? (application?.proposalMessage === 'Direct booking by customer.' ? job.budget : application?.bidAmount) ?? job.budget ?? 0);
+    const amount = getContractAmount(job, application) || Number(job.budget) || 0;
 
     const worker = job.hiredProvider || application?.worker;
     const workerName = worker?.fullName || worker?.email?.split('@')[0] || 'SkillBridge Provider';
