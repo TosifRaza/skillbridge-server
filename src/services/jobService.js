@@ -353,7 +353,7 @@ class JobService {
     const Application = mongoose.models.Application || require('../models/Application');
     const jobIds = rawJobs.map(j => j._id);
     const proposalCounts = await Application.aggregate([
-      { $match: { job: { $in: jobIds } } },
+      { $match: { job: { $in: jobIds }, status: 'Pending' } },
       { $group: { _id: '$job', count: { $sum: 1 } } }
     ]);
 
