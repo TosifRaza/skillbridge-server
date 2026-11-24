@@ -694,14 +694,14 @@ class JobService {
       customerApprovedAt: job.customerApprovedAt,
       isCompleted: job.status === 'Completed',
       paymentMethod: job.paymentMethod || '',
-      worker: {
+      worker: worker ? {
         id: worker?._id,
         name: workerName,
         email: worker?.email,
         phone: worker?.phone,
         upiId: workerUpi,
         hasUpi: Boolean(worker?.payoutDetails?.upiId),
-      },
+      } : null,
       customer: {
         id: job.customer?._id,
         name: job.customer?.fullName || job.customer?.email,
