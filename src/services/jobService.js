@@ -168,6 +168,7 @@
 
 const Job = require('../models/Job');
 const Application = require('../models/Application');
+const Payment = require('../models/Payment');
 const ApiError = require('../utils/ApiError');
 const uploadToCloudinary = require('../utils/cloudinaryUpload');
 const mongoose = require('mongoose');
@@ -215,7 +216,7 @@ class JobService {
       description,
       category,
       budget,
-      contractAmount: isDirectHire ? Number(budget) : null,
+      contractAmount: Number(budget),
       deadline,
       location: {
         type: 'Point',
@@ -363,6 +364,7 @@ class JobService {
 
     const jobs = rawJobs.map(j => ({
       ...j,
+      contractAmount: Number(j.budget),
       proposalCount: countMap[j._id.toString()] || 0,
     }));
 
@@ -482,28 +484,93 @@ class JobService {
       throw new ApiError(404, 'Job not found');
     }
 
+    job.contractAmount = Number(job.budget);
     return job;
   }
 
   /**
    * Worker marks work as completed and sends notification/message to customer
    */
-  async submitWorkCompletion() {
-    throw new ApiError(410, 'Work completion must be submitted through the protected contract payment workflow');
+  async submitWorkCompletion(jobId, workerId, completionData = {}) {
+    const job = await Job.findById(jobId);
+    if (!job) throw new ApiError(404, 'Job not found');
+    const acceptedApplication = await Application.findOne({ job: jobId, status: 'Accepted' }).select('worker');
+    const assignedWorker = job.hiredProvider || acceptedApplication?.worker;
+    if (String(assignedWorker?._id || assignedWorker || '') !== String(workerId)) {
+      throw new ApiError(403, 'Only the assigned worker can submit completed work');
+    }
+    if (!['Assigned', 'In-Progress'].includes(job.status)) {
+      throw new ApiError(409, 'This job is not accepting a work completion update');
+    }
+    if (job.workSubmittedAt) return job;
+
+    const completionMessage = String(completionData.message || '').trim().slice(0, 1000);
+    job.status = 'In-Progress';
+    job.workSubmittedAt = new Date();
+    job.workCompletionMessage = completionMessage;
+    await job.save();
+    return job;
   }
 
   /**
    * Customer clicks "YES" to approve completed work, which unlocks/generates the payment QR option
    */
-  async approveWork() {
-    throw new ApiError(410, 'Work approval and payment must use the protected contract payment workflow');
+  async approveWork(jobId, customerId) {
+    const job = await Job.findOne({ _id: jobId, customer: customerId });
+    if (!job) throw new ApiError(404, 'Job not found or you are not authorized');
+    if (!job.workSubmittedAt) throw new ApiError(409, 'The worker must submit completed work first');
+    job.customerApproved = true;
+    job.customerApprovedAt = new Date();
+    await job.save();
+    return job;
   }
 
   /**
    * Customer confirms payment via QR code or direct payment
    */
-  async confirmQRPayment() {
-    throw new ApiError(410, 'Manual payment confirmation is disabled. Use protected contract checkout.');
+  async confirmQRPayment(jobId, customerId, paymentData = {}) {
+    const job = await Job.findOne({ _id: jobId, customer: customerId });
+    if (!job) throw new ApiError(404, 'Job not found or you are not authorized');
+    if (!job.workSubmittedAt) throw new ApiError(409, 'The worker must submit completed work before payment');
+    if (job.paymentReference) return job;
+    const existingPayment = await Payment.findOne({ job: jobId });
+    if (existingPayment) throw new ApiError(409, 'A protected checkout is already recorded for this job. Do not make a second payment.');
+
+    const reference = String(paymentData.reference || paymentData.utr || '').trim();
+    if (!/^[A-Za-z0-9-]{6,64}$/.test(reference)) {
+      throw new ApiError(400, 'Enter the UPI transaction reference (6–64 letters or numbers)');
+    }
+    const acceptedApplication = await Application.findOne({ job: jobId, status: 'Accepted' });
+    const amount = getContractAmount(job, acceptedApplication);
+    if (!Number.isFinite(amount) || amount < 1) throw new ApiError(409, 'The job does not have a valid posted price');
+
+    job.paymentReference = reference;
+    job.customerApproved = true;
+    job.customerApprovedAt = new Date();
+    await job.save();
+    return job;
+  }
+
+  async confirmUPIReceived(jobId, workerId) {
+    const job = await Job.findById(jobId);
+    if (!job) throw new ApiError(404, 'Job not found');
+    const acceptedApplication = await Application.findOne({ job: jobId, status: 'Accepted' }).select('worker');
+    const assignedWorker = job.hiredProvider || acceptedApplication?.worker;
+    if (String(assignedWorker?._id || assignedWorker || '') !== String(workerId)) {
+      throw new ApiError(403, 'Only the assigned worker can confirm receipt');
+    }
+    if (!job.paymentReference || !job.customerApproved) {
+      throw new ApiError(409, 'The customer must submit the UPI reference first');
+    }
+    if (job.status === 'Completed') return job;
+    const amount = getContractAmount(job, acceptedApplication);
+    job.status = 'Completed';
+    job.paidAmount = amount;
+    job.paymentMethod = 'upi_qr_both_confirmed';
+    job.workerPaymentConfirmedAt = new Date();
+    job.completedAt = new Date();
+    await job.save();
+    return job;
   }
 
   /**
@@ -516,35 +583,53 @@ class JobService {
 
     if (!job) throw new ApiError(404, 'Job not found');
 
-    const Application = mongoose.models.Application || require('../models/Application');
     const application = await Application.findOne({ job: jobId, status: 'Accepted' }).populate('worker', 'fullName email phone payoutDetails');
-    const amount = getContractAmount(job, application) || Number(job.budget) || 0;
+    const isCustomer = String(job.customer?._id || job.customer) === String(userId);
+    const assignedWorker = job.hiredProvider || application?.worker;
+    const isAssignedWorker = String(assignedWorker?._id || assignedWorker || '') === String(userId);
+    if (!isCustomer && !isAssignedWorker) throw new ApiError(403, 'You are not part of this job');
+    const existingPayment = await Payment.findOne({ job: jobId }).select('status grossAmount');
+    const amount = getContractAmount(job, application);
 
     const worker = job.hiredProvider || application?.worker;
     const workerName = worker?.fullName || worker?.email?.split('@')[0] || 'SkillBridge Provider';
-    const workerUpi = worker?.payoutDetails?.upiId || 'skillbridge@upi';
+    const workerUpi = worker?.payoutDetails?.upiId || '';
+    const escrowAlreadyFunded = Boolean(existingPayment && ['Funded', 'WorkSubmitted', 'ReleasePending', 'Released'].includes(existingPayment.status));
+    const legacyCheckoutExists = Boolean(existingPayment);
 
-    const upiIntent = `upi://pay?pa=${encodeURIComponent(workerUpi)}&pn=${encodeURIComponent(workerName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`SkillBridge Work - ${job.title}`)}`;
+    const workSubmitted = Boolean(job.workSubmittedAt);
+    const upiIntent = isCustomer && workSubmitted && workerUpi && !legacyCheckoutExists && !job.paymentReference && job.status !== 'Completed'
+      ? `upi://pay?pa=${encodeURIComponent(workerUpi)}&pn=${encodeURIComponent(workerName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`SkillBridge Job ${String(job._id).slice(-8)}`)}`
+      : '';
 
     return {
       jobId: job._id,
       title: job.title,
       status: job.status,
       amount,
-      workSubmitted: Boolean(job.workSubmittedAt),
+      contractAmount: amount,
+      budget: Number(job.budget),
+      workSubmitted,
       workSubmittedAt: job.workSubmittedAt,
       workCompletionMessage: job.workCompletionMessage || '',
       customerApproved: Boolean(job.customerApproved),
       customerApprovedAt: job.customerApprovedAt,
       isCompleted: job.status === 'Completed',
+      paidAmount: Number(job.paidAmount) || 0,
+      paymentReference: job.paymentReference || '',
+      paymentConfirmedAt: job.customerApprovedAt || null,
+      customerReportedPayment: Boolean(job.paymentReference && job.customerApproved),
+      workerPaymentConfirmedAt: job.workerPaymentConfirmedAt || null,
+      escrowAlreadyFunded,
+      legacyCheckoutExists,
       paymentMethod: job.paymentMethod || '',
       worker: worker ? {
         id: worker?._id,
         name: workerName,
         email: worker?.email,
         phone: worker?.phone,
-        upiId: workerUpi,
-        hasUpi: Boolean(worker?.payoutDetails?.upiId),
+        upiId: isCustomer && workSubmitted ? workerUpi : '',
+        hasUpi: Boolean(workerUpi),
       } : null,
       customer: {
         id: job.customer?._id,

@@ -194,7 +194,7 @@ class ApplicationService {
    * Worker applies to a job
    */
   async applyToJob(workerId, applicationData) {
-    const { job: jobId, proposalMessage, bidAmount, estimatedCompletionTime } = applicationData;
+    const { job: jobId, proposalMessage, estimatedCompletionTime } = applicationData;
 
     // 1. Check if job exists and is open
     const job = await Job.findById(jobId);
@@ -209,7 +209,7 @@ class ApplicationService {
       // FIX: If they previously withdrew or were rejected, allow them to re-apply by updating the existing document
       if (application.status === 'Withdrawn' || application.status === 'Rejected') {
         application.proposalMessage = proposalMessage;
-        application.bidAmount = bidAmount;
+        application.bidAmount = Number(job.budget);
         application.estimatedCompletionTime = estimatedCompletionTime;
         application.status = 'Pending'; // Reset status to Pending
         await application.save();
@@ -226,7 +226,7 @@ class ApplicationService {
         job: jobId,
         worker: workerId,
         proposalMessage,
-        bidAmount,
+        bidAmount: Number(job.budget),
         estimatedCompletionTime,
       });
     } catch (error) {
@@ -344,6 +344,7 @@ class ApplicationService {
 
     const applications = await Application.find({ job: jobId })
       .populate('worker', 'email role fullName avatar phone payoutDetails') // Populate full worker info
+      .populate('job', 'budget title')
       .sort({ createdAt: -1 });
 
     return applications;
@@ -375,7 +376,7 @@ class ApplicationService {
 
         const assignedJob = await Job.findOneAndUpdate(
           { _id: job._id, customer: customerId, status: 'Open' },
-          { $set: { status: 'Assigned', hiredProvider: application.worker, contractAmount: Number(application.bidAmount) } },
+          { $set: { status: 'Assigned', hiredProvider: application.worker, contractAmount: Number(job.budget) } },
           { new: true, session }
         );
 

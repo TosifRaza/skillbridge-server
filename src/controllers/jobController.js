@@ -92,6 +92,15 @@ class JobController {
     }
   }
 
+  async confirmUPIReceived(req, res, next) {
+    try {
+      const result = await JobService.confirmUPIReceived(req.params.id, req.user.id);
+      res.status(200).json(new ApiResponse(200, result, 'UPI payment receipt confirmed'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getJobQRDetails(req, res, next) {
     try {
       const result = await JobService.getJobQRDetails(req.params.id, req.user.id);

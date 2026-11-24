@@ -124,6 +124,13 @@ router.post(
   jobController.confirmQRPayment
 );
 
+router.post(
+  '/:id/confirm-upi-received',
+  protect,
+  authorize('provider'),
+  jobController.confirmUPIReceived
+);
+
 // Get QR payment details
 router.get(
   '/:id/qr-details',

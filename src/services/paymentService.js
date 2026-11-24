@@ -2,7 +2,6 @@ const mongoose = require('mongoose');
 const Application = require('../models/Application');
 const Job = require('../models/Job');
 const Payment = require('../models/Payment');
-const User = require('../models/User');
 const WebhookEvent = require('../models/WebhookEvent');
 const razorpayRoute = require('../integrations/razorpayRoute');
 const config = require('../config');
@@ -101,71 +100,7 @@ class PaymentService {
   }
 
   async createOrder(jobId, customerId) {
-    const { job, application } = await this.getContract(jobId);
-    if (toId(job.customer) !== customerId.toString()) throw new ApiError(403, 'Only the customer can fund this contract');
-    if (job.status !== 'Assigned') throw new ApiError(409, 'Only an assigned contract can be funded');
-
-    const existing = await Payment.findOne({ job: jobId });
-    const breakdown = this.calculateBreakdown(getContractAmount(job, application));
-    this.assertPaymentMatchesContract(existing, application, breakdown.grossAmount);
-    if (existing) {
-      if (existing.status === 'Created') {
-        return { ...this.serialize(existing, breakdown, job, customerId), orderId: existing.razorpayOrderId };
-      }
-      if (existing.status !== 'Failed') throw new ApiError(409, 'This contract payment has already been processed');
-    }
-
-    const worker = await User.findById(application.worker).select('+razorpayLinkedAccountId payoutStatus fullName email');
-    if (!worker || worker.payoutStatus !== 'Active' || !worker.razorpayLinkedAccountId) {
-      throw new ApiError(409, 'The worker must connect and verify a payout account before this contract can be funded');
-    }
-
-    const order = await razorpayRoute.createOrder({
-      amount: breakdown.grossPaise,
-      currency: 'INR',
-      receipt: `sb_${job._id}`,
-      notes: { job_id: job._id.toString(), application_id: application._id.toString() },
-      transfers: [{
-        account: worker.razorpayLinkedAccountId,
-        amount: breakdown.workerPaise,
-        currency: 'INR',
-        on_hold: true,
-        notes: { job_id: job._id.toString(), worker_id: worker._id.toString() },
-        linked_account_notes: ['job_id'],
-      }],
-    });
-
-    const payment = existing
-      ? await Payment.findByIdAndUpdate(existing._id, {
-        $set: {
-          grossAmount: breakdown.grossAmount,
-          commissionPercent: breakdown.commissionPercent,
-          commissionAmount: breakdown.commissionAmount,
-          workerAmount: breakdown.workerAmount,
-          status: 'Created',
-          razorpayOrderId: order.id,
-          razorpayPaymentId: '',
-          razorpayTransferId: '',
-          transferStatus: '',
-          settlementStatus: '',
-          fundedAt: null,
-          workSubmittedAt: null,
-          releasedAt: null,
-          failureReason: '',
-        },
-      }, { new: true })
-      : await Payment.create({
-        job: job._id,
-        application: application._id,
-        customer: customerId,
-        worker: application.worker,
-        grossAmount: breakdown.grossAmount,
-        commissionPercent: breakdown.commissionPercent,
-        commissionAmount: breakdown.commissionAmount,
-        workerAmount: breakdown.workerAmount,
-        razorpayOrderId: order.id,
-      });
-    return { ...this.serialize(payment, breakdown, job, customerId), orderId: order.id };
+    throw new ApiError(410, 'Contract pre-funding is no longer used. Complete the work first, then pay using the job QR.');
   }
 
   async verifyPayment(customerId, details) {

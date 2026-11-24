@@ -7,13 +7,10 @@ const isDirectBooking = (job, application) => {
 };
 
 const getContractAmount = (job, application) => {
-  // A direct hire is priced at the customer's posted budget. Older records may
-  // contain a stale contractAmount/bidAmount from the marketplace flow.
-  if (isDirectBooking(job, application)) return Number(job?.budget) || 0;
-  if (job?.contractAmount !== null && job?.contractAmount !== undefined && Number.isFinite(Number(job.contractAmount))) {
-    return Number(job.contractAmount);
-  }
-  return Number(application?.bidAmount);
+  // The posted service price is the single source of truth for every job type.
+  // Proposal amounts and legacy contractAmount values must not change it.
+  const budget = Number(job?.budget);
+  return Number.isFinite(budget) ? budget : 0;
 };
 
 module.exports = { isDirectBooking, getContractAmount };

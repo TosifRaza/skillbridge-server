@@ -10,11 +10,6 @@ const createApplicationValidator = [
     .withMessage('Proposal message is required')
     .isLength({ max: 2000 })
     .withMessage('Proposal cannot exceed 2000 characters'),
-  body('bidAmount')
-    .isNumeric()
-    .withMessage('Bid amount must be a number')
-    .isFloat({ min: 1 })
-    .withMessage('Proposed price must be at least ₹1'),
   body('estimatedCompletionTime')
     .notEmpty()
     .withMessage('Estimated completion time is required'),

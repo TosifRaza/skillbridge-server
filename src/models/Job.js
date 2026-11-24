@@ -104,6 +104,16 @@ const jobSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  paymentReference: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 64,
+  },
+  workerPaymentConfirmedAt: {
+    type: Date,
+    default: null,
+  },
   completedAt: {
     type: Date,
     default: null,
