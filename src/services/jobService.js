@@ -383,6 +383,7 @@ class JobService {
     const {
       keyword,
       category,
+      serviceType,
       city,
       minBudget,
       maxBudget,
@@ -416,6 +417,11 @@ class JobService {
     // Filter by category
     if (category) {
       filter.category = category;
+    }
+
+    // Honor the Local / Digital filter controls in the worker job browser.
+    if (['local', 'digital'].includes(serviceType)) {
+      filter.serviceType = serviceType;
     }
 
     // Filter by city
