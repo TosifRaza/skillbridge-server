@@ -3,6 +3,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { xss } = require('express-xss-sanitizer');
 const config = require('../config');
+const isAllowedClientOrigin = require('../utils/isAllowedClientOrigin');
 
 // Custom MongoDB Sanitizer to replace the buggy express-mongo-sanitize
 const customMongoSanitize = (req, res, next) => {
@@ -29,18 +30,8 @@ const securityMiddleware = {
   // Cross-Origin Resource Sharing
   cors: cors({
     origin: (origin, callback) => {
-      // Allow non-browser requests (Postman, curl, server-to-server)
-      if (!origin) return callback(null, true);
-      // Allow the configured app, local development, and Render hosted frontends.
-      if (
-        origin.startsWith('http://localhost:') ||
-        origin.startsWith('https://localhost:') ||
-        origin.endsWith('.onrender.com') ||
-        origin === config.clientUrl
-      ) {
-        return callback(null, true);
-      }
-      return callback(new Error('Origin is not allowed by CORS'));
+      const isAllowed = isAllowedClientOrigin(origin, config.clientUrl);
+      callback(isAllowed ? null : new Error('Origin is not allowed by CORS'), isAllowed);
     },
     credentials: true,
   }),
