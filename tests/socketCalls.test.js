@@ -62,6 +62,21 @@ describe('authenticated call signaling', () => {
     }));
   });
 
+  test('acknowledges when a valid call target is offline', async () => {
+    ChatService.getCallParticipant.mockResolvedValue('customer-id');
+    const { socketListeners } = createConnectedSocket();
+    const acknowledge = jest.fn();
+
+    await socketListeners.get('call-initiate')({
+      conversationId: 'job-123',
+      callId: 'call-offline',
+      callType: 'audio',
+      offer: { type: 'offer', sdp: 'test-sdp' },
+    }, acknowledge);
+
+    expect(acknowledge).toHaveBeenCalledWith({ ok: true, delivered: false });
+  });
+
   test.each([
     ['call-answer', 'call-answered', { answer: { type: 'answer', sdp: 'answer-sdp' } }],
     ['call-ice-candidate', 'call-ice-candidate', { candidate: { candidate: 'ice' } }],

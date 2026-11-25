@@ -96,26 +96,35 @@ module.exports = (io) => {
       }
     };
 
-    socket.on('call-initiate', async (data = {}) => {
+    socket.on('call-initiate', async (data = {}, acknowledge) => {
       if (!['audio', 'video'].includes(data.callType) || !data.offer || !data.callId) return;
       try {
+        const peerId = await ChatService.getCallParticipant(data.conversationId, userId);
+        if (!peerId) {
+          if (typeof acknowledge === 'function') acknowledge({ ok: false, message: 'This conversation has no active call participant.' });
+          return;
+        }
         const callLog = await ChatService.createCallLog(data.conversationId, userId, data);
         io.to(data.conversationId).emit('receive-message', callLog);
+        const delivered = getSocketId(peerId).length > 0;
+        io.to(peerId).emit('call-incoming', {
+          conversationId: data.conversationId,
+          callId: data.callId,
+          callType: data.callType,
+          offer: data.offer,
+          caller: {
+            id: userId,
+            name: socket.user.fullName || socket.user.email,
+            avatar: socket.user.avatar?.url || '',
+          },
+          fromUserId: userId,
+        });
+        if (typeof acknowledge === 'function') acknowledge({ ok: true, delivered });
       } catch (error) {
         console.error('Call log create error:', error.message);
+        if (typeof acknowledge === 'function') acknowledge({ ok: false, message: 'The call could not be sent. Please try again.' });
         return;
       }
-      await relayCallEvent('call-incoming', {
-        conversationId: data.conversationId,
-        callId: data.callId,
-        callType: data.callType,
-        offer: data.offer,
-        caller: {
-          id: userId,
-          name: socket.user.fullName || socket.user.email,
-          avatar: socket.user.avatar?.url || '',
-        },
-      });
     });
 
     socket.on('call-answer', async (data = {}) => {
