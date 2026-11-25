@@ -12,7 +12,7 @@ const config = {
 jwtAccessSecret: process.env.JWT_ACCESS_SECRET || 'super_secret_access_key_change_me',
 jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'super_secret_refresh_key_change_me',
 jwtAccessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
-jwtRefreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d',
+jwtRefreshExpiry: process.env.JWT_REFRESH_EXPIRY || '365d',
 // Cloudinary Config
 cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
 cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,

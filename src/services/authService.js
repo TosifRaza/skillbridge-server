@@ -60,6 +60,10 @@ class AuthService {
       throw new ApiError(403, 'Invalid or expired refresh token');
     }
 
+    if (user.isBlocked) {
+      throw new ApiError(403, 'Your account has been suspended. Please contact support.');
+    }
+
     // Rotate refresh token (Security best practice)
     const newAccessToken = generateAccessToken(user._id, user.role);
     const newRefreshToken = generateRefreshToken(user._id);

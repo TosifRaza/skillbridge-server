@@ -127,13 +127,19 @@ module.exports = (io) => {
       }
     });
 
-    socket.on('call-answer', async (data = {}) => {
+    socket.on('call-answer', async (data = {}, acknowledge) => {
       try {
+        if (!data.callId || !data.conversationId || !data.answer) {
+          if (typeof acknowledge === 'function') acknowledge({ ok: false, message: 'Call answer is incomplete.' });
+          return;
+        }
         const callLog = await ChatService.updateCallLog(data.conversationId, data.callId, userId, 'answer');
         io.to(data.conversationId).emit('call-log-updated', callLog);
         await relayCallEvent('call-answered', data);
+        if (typeof acknowledge === 'function') acknowledge({ ok: true });
       } catch (error) {
         console.error('Call answer error:', error.message);
+        if (typeof acknowledge === 'function') acknowledge({ ok: false, message: error.message || 'Call answer could not be relayed.' });
       }
     });
     socket.on('call-ice-candidate', (data) => relayCallEvent('call-ice-candidate', data));

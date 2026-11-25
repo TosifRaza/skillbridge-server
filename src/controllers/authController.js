@@ -104,7 +104,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: 365 * 24 * 60 * 60 * 1000,
       });
 
       res
@@ -135,7 +135,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: 365 * 24 * 60 * 60 * 1000,
       });
 
       res
@@ -159,7 +159,7 @@ class AuthController {
   async refreshAccessToken(req, res, next) {
     try {
       const incomingRefreshToken =
-        req.cookies.refreshToken || req.body.refreshToken;
+        req.body.refreshToken || req.cookies.refreshToken;
 
       const { newAccessToken, newRefreshToken } =
         await AuthService.refreshAccessToken(incomingRefreshToken);
@@ -168,7 +168,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: 365 * 24 * 60 * 60 * 1000,
       });
 
       res
@@ -176,7 +176,7 @@ class AuthController {
         .json(
           new ApiResponse(
             200,
-            { accessToken: newAccessToken },
+            { accessToken: newAccessToken, refreshToken: newRefreshToken },
             'Token refreshed successfully'
           )
         );
