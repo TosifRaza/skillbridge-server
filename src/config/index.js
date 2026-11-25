@@ -24,6 +24,11 @@ razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
 razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
 platformCommissionPercent: Number(process.env.PLATFORM_COMMISSION_PERCENT || 5),
 
+  // TURN REST credentials are minted per authenticated request; the shared
+  // secret stays in backend deployment configuration.
+  turnUrls: (process.env.TURN_URLS || '').split(',').map((url) => url.trim()).filter(Boolean),
+  turnSharedSecret: process.env.TURN_SHARED_SECRET || '',
+
 // Pagination Config
 defaultPageLimit: process.env.DEFAULT_PAGE_LIMIT || 10,
 };

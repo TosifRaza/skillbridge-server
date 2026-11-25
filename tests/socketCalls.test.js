@@ -1,6 +1,8 @@
 jest.mock('../src/services/chatService', () => ({
   markAsRead: jest.fn(),
   getCallParticipant: jest.fn(),
+  createCallLog: jest.fn().mockResolvedValue({ _id: 'call-log' }),
+  updateCallLog: jest.fn().mockResolvedValue({ _id: 'call-log' }),
 }));
 
 const ChatService = require('../src/services/chatService');
@@ -47,8 +49,10 @@ describe('authenticated call signaling', () => {
     });
 
     expect(ChatService.getCallParticipant).toHaveBeenCalledWith('job-123', 'worker-id');
+    expect(io.to).toHaveBeenCalledWith('job-123');
     expect(io.to).toHaveBeenCalledWith('customer-id');
-    expect(io.to.mock.results[0].value.emit).toHaveBeenCalledWith('call-incoming', expect.objectContaining({
+    const peerEmit = io.to.mock.results[io.to.mock.calls.findIndex(([room]) => room === 'customer-id')].value.emit;
+    expect(peerEmit).toHaveBeenCalledWith('call-incoming', expect.objectContaining({
       conversationId: 'job-123',
       callId: 'call-123',
       callType: 'video',
@@ -61,6 +65,7 @@ describe('authenticated call signaling', () => {
   test.each([
     ['call-answer', 'call-answered', { answer: { type: 'answer', sdp: 'answer-sdp' } }],
     ['call-ice-candidate', 'call-ice-candidate', { candidate: { candidate: 'ice' } }],
+    ['call-renegotiate', 'call-renegotiate', { description: { type: 'offer', sdp: 'restarted-offer' } }],
     ['call-decline', 'call-declined', {}],
     ['call-end', 'call-ended', {}],
   ])('relays %s to the authorized peer', async (incomingEvent, outgoingEvent, extraData) => {
@@ -72,7 +77,8 @@ describe('authenticated call signaling', () => {
 
     expect(ChatService.getCallParticipant).toHaveBeenCalledWith('job-123', 'worker-id');
     expect(io.to).toHaveBeenCalledWith('customer-id');
-    expect(io.to.mock.results[0].value.emit).toHaveBeenCalledWith(outgoingEvent, { ...data, fromUserId: 'worker-id' });
+    const peerEmit = io.to.mock.results[io.to.mock.calls.findIndex(([room]) => room === 'customer-id')].value.emit;
+    expect(peerEmit).toHaveBeenCalledWith(outgoingEvent, { ...data, fromUserId: 'worker-id' });
   });
 
   test('does not deliver signaling to a user who is not a chat participant', async () => {
@@ -81,7 +87,7 @@ describe('authenticated call signaling', () => {
 
     await socketListeners.get('call-end')({ conversationId: 'private-job', callId: 'call-123' });
 
-    expect(io.to).not.toHaveBeenCalled();
+    expect(io.to).not.toHaveBeenCalledWith('customer-id');
   });
 
   test('ignores malformed call offers', async () => {

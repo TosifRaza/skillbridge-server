@@ -62,6 +62,7 @@ const { uploadChatImage, uploadChatDocument } = require('../middlewares/uploadMi
 
 // FIX: Added /conversations route BEFORE /:conversationId
 router.get('/conversations', protect, chatController.getConversations);
+router.get('/calls/ice-servers', protect, chatController.getIceServers);
 
 router.get('/:conversationId', protect, chatController.getChatHistory);
 router.post('/:conversationId/files', protect, uploadChatDocument, chatController.sendDocument);

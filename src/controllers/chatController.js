@@ -116,8 +116,25 @@
 const ChatService = require('../services/chatService');
 const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
+const config = require('../config');
+const crypto = require('crypto');
 
 class ChatController {
+  async getIceServers(req, res, next) {
+    try {
+      const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+      if (config.turnUrls.length && config.turnSharedSecret) {
+        const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
+        const username = `${expiresAt}:${req.user.id}`;
+        const credential = crypto.createHmac('sha1', config.turnSharedSecret).update(username).digest('base64');
+        iceServers.push({ urls: config.turnUrls, username, credential });
+      }
+      res.status(200).json(new ApiResponse(200, { iceServers }, 'Call network configuration fetched'));
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getChatHistory(req, res, next) {
     try {
       await ChatService.requireParticipant(req.params.conversationId, req.user.id);

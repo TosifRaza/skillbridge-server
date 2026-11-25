@@ -128,6 +128,11 @@ module.exports = (io) => {
       }
     });
     socket.on('call-ice-candidate', (data) => relayCallEvent('call-ice-candidate', data));
+    socket.on('call-renegotiate', (data = {}) => {
+      if (!data.callId || !data.conversationId || !data.description || !['offer', 'answer'].includes(data.description.type)) return;
+      if (typeof data.description.sdp !== 'string' || data.description.sdp.length > 100000) return;
+      return relayCallEvent('call-renegotiate', data);
+    });
     socket.on('call-decline', async (data = {}) => {
       try {
         const callLog = await ChatService.updateCallLog(data.conversationId, data.callId, userId, 'decline');
